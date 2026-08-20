@@ -1,5 +1,42 @@
 # Change Log
 
+## [1.38.0] - 2026-08-20
+
+### Security
+* Prevent Git argument injection from the webview: commit hashes, branch/tag/remote names and stash selectors received from the Git Graph View are validated before being passed to Git, so values like `--upload-pack=...` or `--exec=...` can no longer be smuggled into Git commands (`fetch`, `push`, `checkout`, `reset`, `revert`, `cherry-pick`, `drop`, `addTag`, `addRemote`, stash operations, and the Gerrit actions).
+* Fix a command injection in the interactive rebase opened in the integrated terminal: the branch name is now safely POSIX-quoted (a branch name containing quotes or shell metacharacters previously broke out of the command).
+* Fix an XSS in the Find widget: commit messages and author names containing HTML (e.g. `<img onerror=...>`) are no longer interpreted as HTML when highlighted as find matches.
+* Escape custom emoji mapping payloads as HTML and cap their length, so a malicious mapping can no longer inject markup into commit messages.
+* Remove the hardcoded GitLab API token from the source code: the GitLab avatar lookup now runs unauthenticated by default, and an optional `gerrit-graph.avatars.gitlabToken` setting (read-only scope is sufficient) can be configured to raise the API rate limit.
+* Encode the JSON payloads embedded in the webview's inline `<script>` elements, so repository names or paths containing `</script>` can no longer break out of the script block.
+* Harden the askpass server: malformed or unauthenticated requests now receive an HTTP 400 response instead of crashing the request handler, and the askpass shell scripts quote their variables.
+
+### Stability
+* Errors thrown while handling a webview message are now caught and logged, and the repository file watcher is always unmuted afterwards (a failing action previously left the watcher muted forever, silently stopping repository refreshes).
+* The file watcher mute state is reference counted, so concurrent Git actions can no longer re-enable the watcher while another action is still running (spurious refresh loops).
+* Guarded the avatar manager against malformed API responses and unexpected content types (previously crashed the extension host), and URL-encode the email in the GitLab API request.
+* Remote Gerrit operations (`ls-remote` / `fetch`) now time out after 60 seconds, so a stalled SSH/HTTP connection can no longer block the view in a loading state forever; the parsed NoteDb meta cache is capped at 500 entries (LRU).
+* Guarded the webview against crashes on stale commits: requesting details, context menus or the commit details view for a commit that is no longer loaded no longer throws; handler errors in the webview message loop are isolated per message.
+* Fixed Gerrit meta event rows being anchored to the wrong commit when several commits share one change number (multiple patchsets).
+* Fixed `getAuthorList` returning an object instead of an array on error, `evalPromises` hanging when the parallelism is zero, `stopWatchingFolder` failing on unwatched folders, the buffered queue dropping falsy items, and the commit history search (`searchCommits`) misparsing subjects and author names containing `|`.
+
+### Responsiveness
+* The graph column width limit is recomputed when the view is resized (previously kept a stale width until the next commit reload).
+* The Find widget, the repository settings widget and the dropdown menus now adapt to narrow and short views (no more overflowing past the left edge or past the bottom of the window).
+* The Gerrit control row drops its dead right-hand padding, and all controls wrap gracefully on narrow views.
+* The Gerrit review colours now follow the active theme (VS Code chart colours) and support the high-contrast theme.
+
+### Added
+* **Filter commits by path**: a new filter button (next to Find) limits the loaded commits to those that modified a file or directory (git pathspec syntax supported), addressing the most requested upstream feature.
+* **Compare commits**: "Select for Compare" / "Compare with Selected Commit" in the commit context menu open the diff between any two commits.
+* **Diff with Working Tree**: the commit context menu can open an external directory diff between a commit and the current working tree.
+* Branding: all user-facing messages now consistently say "Gerrit Graph".
+
+### Tests
+* Restored the 40 skipped `DataSource` tests (repository info, commit loading and config), updated to the current command pipeline (NUL-separated log records, full-body subjects, Gerrit change-ref exclusions, tags).
+* Added a real-Git scenario suite (`tests/complexGitScenarios.test.ts`): non-fast-forward merges, octopus merges, rebased history, orphan branches, annotated/lightweight/multiple tags, stashes, detached HEAD, empty repositories, the new path filter, and separator characters in subjects/author names.
+* Added the first unit tests of the webview modules (`web/graph.ts` colour stability/lane layout, `web/textFormatter.ts` escaping/formatting/XSS regressions), a security regression suite (input validation, injection rejection, shell quoting, inline-script encoding), error-isolation tests for the webview message dispatcher, and GitLab token/malformed-response tests for the avatar manager.
+
 ## [1.37.32] - 2026-08-20
 * Add a "Gerrit Code Review > Change Refs Cache" setting to the Git Graph View's Repository Settings: choose between caching **all** open Gerrit change refs (`refs/remotes/<remote>/changes/*`) or only the **latest N changes** (1..10000). The choice is saved to the global User Settings (`gerrit-graph.gerrit.fetchMode` / `gerrit-graph.gerrit.fetchLimit`), the Gerrit cache is invalidated immediately, and the view reloads and re-fetches (pruning surplus local change refs) so the new cache size takes effect right away.
 

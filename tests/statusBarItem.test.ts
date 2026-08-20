@@ -33,7 +33,7 @@ describe('StatusBarItem', () => {
 
 		// Assert
 		expect(vscodeStatusBarItem.text).toBe('Gerrit Graph');
-		expect(vscodeStatusBarItem.tooltip).toBe('View Git Graph');
+		expect(vscodeStatusBarItem.tooltip).toBe('View Gerrit Graph');
 		expect(vscodeStatusBarItem.command).toBe('gerrit-graph.view');
 		expect(vscodeStatusBarItem.show).toHaveBeenCalledTimes(1);
 		expect(vscodeStatusBarItem.hide).toHaveBeenCalledTimes(0);

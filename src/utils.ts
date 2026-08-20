@@ -128,6 +128,73 @@ export function abbrevCommit(commitHash: string) {
 	return commitHash.substring(0, 8);
 }
 
+const COMMIT_HASH_REGEX = /^[0-9a-fA-F]{4,40}$/;
+
+/**
+ * Check whether a commit hash received from an untrusted source (e.g. the webview) is a
+ * hexadecimal hash, and therefore cannot be misinterpreted by git as an option (e.g. `--exec`).
+ * @param commitHash The commit hash to validate.
+ * @returns Whether the commit hash is valid.
+ */
+export function isValidCommitHash(commitHash: string): boolean {
+	return typeof commitHash === 'string' && COMMIT_HASH_REGEX.test(commitHash);
+}
+
+/**
+ * Check whether a reference name (branch, tag or remote name) received from an untrusted source
+ * is safe to be passed to git. Rejects names that could be interpreted as git options
+ * (e.g. starting with `-`), or that violate the git ref name format rules.
+ * See https://git-scm.com/docs/git-check-ref-format
+ * @param name The reference name to validate.
+ * @returns Whether the reference name is safe.
+ */
+export function isSafeRefName(name: string): boolean {
+	if (typeof name !== 'string' || name.length === 0) return false;
+	if (name[0] === '-' || name[0] === '.') return false;
+	if (name.endsWith('/') || name.endsWith('.') || name.endsWith('.lock')) return false;
+	// Reject ASCII control characters (including newlines), and characters disallowed in ref names
+	if (/[\u0000-\u001f\u007f]/.test(name)) return false;
+	return ['..', '@{', '\\', '^', ':', '?', '[', '*'].every((seq) => name.indexOf(seq) === -1);
+}
+
+/**
+ * Quote a value so it can be safely embedded as a single-quoted argument in a POSIX shell command.
+ * @param value The value to quote.
+ * @returns The quoted value.
+ */
+export function quoteShellArg(value: string): string {
+	return '\'' + value.replace(/'/g, '\'\\\'\'') + '\'';
+}
+
+const STASH_SELECTOR_REGEX = /^refs\/stash@\{\d+\}$/;
+
+/**
+ * Check whether a stash selector received from an untrusted source matches the expected
+ * `stash@{N}` format, and therefore cannot be misinterpreted by git as an option.
+ * @param selector The stash selector to validate.
+ * @returns Whether the stash selector is safe.
+ */
+export function isSafeStashSelector(selector: string): boolean {
+	return typeof selector === 'string' && STASH_SELECTOR_REGEX.test(selector);
+}
+
+/**
+ * Encode a JSON string so that it can be safely embedded inside an inline `<script>` element.
+ * Escapes characters that could terminate the script block (e.g. `</script>`, `<!--`), and
+ * characters that are invalid in JavaScript string literals (U+2028, U+2029).
+ * The escaped sequences are decoded identically when the script is evaluated.
+ * @param json The JSON string to encode.
+ * @returns The encoded JSON string.
+ */
+export function encodeJsonForInlineScript(json: string): string {
+	return json
+		.replace(/</g, '\\u003C')
+		.replace(/>/g, '\\u003E')
+		.replace(/&/g, '\\u0026')
+		.replace(/\u2028/g, '\\u2028')
+		.replace(/\u2029/g, '\\u2029');
+}
+
 /**
  * Abbreviate a string to the specified number of characters.
  * @param text The string to abbreviate.
@@ -343,7 +410,7 @@ export function createPullRequest(config: PullRequestConfig, sourceOwner: string
  * @returns A promise resolving to the ErrorInfo of the executed command.
  */
 export function openExtensionSettings(): Thenable<ErrorInfo> {
-	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:Gxl.gerrit-graph').then(
+	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:neophack.gerrit-graph').then(
 		() => null,
 		() => 'Visual Studio Code was unable to open the Git Graph Extension Settings.'
 	);
@@ -511,7 +578,7 @@ export function openGitTerminal(cwd: string, gitPath: string, command: string | 
 
 	const options: vscode.TerminalOptions = {
 		cwd: cwd,
-		name: 'Git Graph: ' + name,
+		name: 'Gerrit Graph: ' + name,
 		env: { 'PATH': p }
 	};
 	const shell = getConfig().integratedTerminalShell;
@@ -563,6 +630,11 @@ export function showErrorMessage(message: string) {
  */
 export function evalPromises<X, Y>(data: X[], maxParallel: number, createPromise: (val: X) => Promise<Y>) {
 	return new Promise<Y[]>((resolve, reject) => {
+		// Fall back to sequential evaluation if an invalid maximum parallelism was provided, so
+		// that the returned promise always settles
+		if (maxParallel < 1 || !isFinite(maxParallel)) {
+			maxParallel = 1;
+		}
 		if (data.length === 1) {
 			createPromise(data[0]).then(v => resolve([v])).catch(() => reject());
 		} else if (data.length === 0) {

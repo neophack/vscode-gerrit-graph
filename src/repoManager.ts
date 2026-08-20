@@ -566,8 +566,10 @@ export class RepoManager extends Disposable {
 	 * @param path The path of the directory.
 	 */
 	private stopWatchingFolder(path: string) {
-		this.folderWatchers[path].dispose();
-		delete this.folderWatchers[path];
+		if (this.folderWatchers[path] !== undefined) {
+			this.folderWatchers[path].dispose();
+			delete this.folderWatchers[path];
+		}
 	}
 
 	/**

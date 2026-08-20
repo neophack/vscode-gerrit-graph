@@ -788,13 +788,29 @@ body.tagLabelsRightAligned .gitRef.tag{
 
 /* Controls */
 
+/*
+ * The header bar wrapper. Both header rows (#controls + #gerritControls) live inside it, so that
+ * when the header is sticky the two rows always scroll together as a single bar and can never
+ * overlap each other.
+ */
+#headerRow{
+	position:relative;
+	background-color: var(--vscode-editor-background);
+}
+#headerRow.sticky {
+	position:sticky;
+	top:0;
+	z-index:12;
+}
+
 #controls{
 	display:block;
 	position: relative;
 	left:0;
 	right:0;
 	top:0;
-	padding:4px 132px 4px 0;
+	white-space:nowrap;
+	padding:4px 162px 4px 0;
 	background-color: var(--vscode-editor-background);
 	border-bottom:1px solid rgba(128,128,128,0.5);
 	line-height:32px;
@@ -803,11 +819,6 @@ body.tagLabelsRightAligned .gitRef.tag{
 	font-size:13px;
 	-webkit-user-select:none;
 	user-select:none;
-}
-
-#controls.sticky {
-	position:sticky;
-	z-index:12;
 }
 
 #repoControl, #branchControl, #showRemoteBranchesControl{
@@ -823,16 +834,20 @@ body.tagLabelsRightAligned .gitRef.tag{
 }
 
 .dropdownCurrentValue{
-	max-width:30vw;
+	max-width:12vw;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	vertical-align:bottom;
 }
 #controls.singleRepo #repoControl{
 	display:none;
 }
 #controls.singleRepo .dropdownCurrentValue{
-	max-width:40vw;
+	max-width:16vw;
 }
 
-#currentBtn, #findBtn, #terminalBtn, #settingsBtn, #fetchBtn, #refreshBtn{
+#currentBtn, #findBtn, #filterBtn, #terminalBtn, #settingsBtn, #fetchBtn, #refreshBtn{
 	position:absolute;
 	top:50%;
 	width:20px;
@@ -843,9 +858,12 @@ body.tagLabelsRightAligned .gitRef.tag{
 	user-select:none;
 }
 #currentBtn{
-	right:130px;
+	right:160px;
 }
 #findBtn{
+	right:130px;
+}
+#filterBtn{
 	right:100px;
 }
 #terminalBtn{
@@ -864,7 +882,7 @@ body.tagLabelsRightAligned .gitRef.tag{
 #refreshBtn.refreshing{
 	cursor:default;
 }
-#currentBtn svg, #findBtn svg, #terminalBtn svg, #settingsBtn svg, #fetchBtn svg, #refreshBtn svg{
+#currentBtn svg, #findBtn svg, #filterBtn svg, #terminalBtn svg, #settingsBtn svg, #fetchBtn svg, #refreshBtn svg{
 	position:absolute;
 	fill:var(--vscode-editor-foreground);
 	opacity:0.8;
@@ -872,21 +890,25 @@ body.tagLabelsRightAligned .gitRef.tag{
 	stroke-opacity:0.5;
 	stroke-width:0;
 }
-#currentBtn svg, #findBtn svg, #terminalBtn svg{
+#currentBtn svg, #findBtn svg, #filterBtn svg, #terminalBtn svg{
 	stroke-width:0.5px;
 }
-#currentBtn:hover svg, #findBtn:hover svg, #terminalBtn:hover svg, #settingsBtn:hover svg, #fetchBtn:hover svg, #refreshBtn:hover svg{
+#currentBtn:hover svg, #findBtn:hover svg, #filterBtn:hover svg, #terminalBtn:hover svg, #settingsBtn:hover svg, #fetchBtn:hover svg, #refreshBtn:hover svg{
 	opacity:1;
 	stroke-width:0.5px;
 }
-#currentBtn:hover svg, #findBtn:hover svg, #terminalBtn:hover svg{
+#currentBtn:hover svg, #findBtn:hover svg, #filterBtn:hover svg, #terminalBtn:hover svg{
 	stroke-width:1px;
 }
-#currentBtn svg, #findBtn svg, #terminalBtn svg, #settingsBtn svg, #fetchBtn svg{
+#currentBtn svg, #findBtn svg, #filterBtn svg, #terminalBtn svg, #settingsBtn svg, #fetchBtn svg{
 	left:1px;
 	top:1px;
 	width:18px !important;
 	height:18px !important;
+}
+#filterBtn.active svg{
+	opacity:1;
+	fill:var(--vscode-textLink-foreground, var(--vscode-editor-foreground));
 }
 #refreshBtn svg{
 	left:2px;
@@ -903,12 +925,15 @@ body.tagLabelsRightAligned .gitRef.tag{
 }
 
 #controls.fetchSupported{
-	padding-right:162px;
+	padding-right:192px;
 }
 #controls.fetchSupported #currentBtn{
-	right:160px;
+	right:190px;
 }
 #controls.fetchSupported #findBtn{
+	right:160px;
+}
+#controls.fetchSupported #filterBtn{
 	right:130px;
 }
 #controls.fetchSupported #terminalBtn{
@@ -1054,72 +1079,102 @@ body.tagLabelsRightAligned .tagsWrapper {
 
 /* Gerrit Integration */
 
-.gitRef.gerrit svg {
-	fill: #f5a623;
+/*
+ * Gerrit colour palette. The colours default to VS Code's chart colours so that they follow the
+ * active theme, with the original GitHub-inspired palette as fallbacks.
+ */
+:root{
+	--gg-icon:var(--vscode-charts-yellow, #f5a623);
+	--gg-approved:var(--vscode-charts-green, #2da44e);
+	--gg-approval-weak:var(--vscode-charts-green, #84d16d);
+	--gg-neutral:var(--vscode-descriptionForeground, #8b949e);
+	--gg-disapproval-weak:var(--vscode-charts-orange, #e08c38);
+	--gg-rejected:var(--vscode-charts-red, #d1242f);
+	--gg-merged:var(--vscode-charts-green, #7ca690);
+	--gg-muted-foreground:var(--vscode-descriptionForeground, rgba(139, 148, 158, 0.95));
+	--gg-muted-border:var(--vscode-descriptionForeground, rgba(139, 148, 158, 0.55));
+	--gg-muted-hover:rgba(139, 148, 158, 0.2);
+	--gg-muted-detail:rgba(139, 148, 158, 0.14);
+	--gg-muted-detail-background:rgba(139, 148, 158, 0.12);
+}
+body.vscode-high-contrast{
+	--gg-icon:var(--vscode-editorLightBulb-foreground, #f5a623);
+	--gg-approved:var(--vscode-testing-iconPassed, #2da44e);
+	--gg-rejected:var(--vscode-testing-iconFailed, #d1242f);
+	--gg-disapproval-weak:var(--vscode-editorWarning-foreground, #e08c38);
+	--gg-muted-foreground:var(--vscode-editor-foreground);
+	--gg-muted-border:var(--vscode-editor-foreground);
+	--gg-muted-hover:rgba(255, 255, 255, 0.18);
+	--gg-muted-detail:rgba(255, 255, 255, 0.16);
+	--gg-muted-detail-background:rgba(255, 255, 255, 0.12);
 }
 
-.gitRef.gerrit .gg-label {
-	margin-left: 4px;
-	padding: 0 4px;
-	border-radius: 3px;
-	font-size: 9px;
-	font-weight: bold;
-	color: var(--vscode-editor-background);
+.gitRef.gerrit svg{
+	fill:var(--gg-icon);
 }
 
-.gitRef.gerrit .gg-label.cr2 { background-color: #2da44e; }
-.gitRef.gerrit .gg-label.cr1 { background-color: #84d16d; }
-.gitRef.gerrit .gg-label.cr0 { background-color: #8b949e; }
-.gitRef.gerrit .gg-label.cr-1 { background-color: #e08c38; }
-.gitRef.gerrit .gg-label.cr-2 { background-color: #d1242f; }
-.gitRef.gerrit .gg-label.v1 { background-color: #2da44e; }
-.gitRef.gerrit .gg-label.v-1 { background-color: #d1242f; }
-
-.gitRef.gerrit .gg-status {
-	margin-left: 4px;
-	font-size: 9px;
-	opacity: 0.75;
+.gitRef.gerrit .gg-label{
+	margin-left:4px;
+	padding:0 4px;
+	border-radius:3px;
+	font-size:9px;
+	font-weight:bold;
+	color:var(--vscode-editor-background);
 }
 
-.gitRef.gerrit .gg-status.merged { color: #8b949e; }
-.gitRef.gerrit .gg-status.abandoned { color: #d1242f; text-decoration: none; }
-.gitRef.gerrit .gg-status.wip { color: #e08c38; }
+.gitRef.gerrit .gg-label.cr2{ background-color:var(--gg-approved); }
+.gitRef.gerrit .gg-label.cr1{ background-color:var(--gg-approval-weak); }
+.gitRef.gerrit .gg-label.cr0{ background-color:var(--gg-neutral); }
+.gitRef.gerrit .gg-label.cr-1{ background-color:var(--gg-disapproval-weak); }
+.gitRef.gerrit .gg-label.cr-2{ background-color:var(--gg-rejected); }
+.gitRef.gerrit .gg-label.v1{ background-color:var(--gg-approved); }
+.gitRef.gerrit .gg-label.v-1{ background-color:var(--gg-rejected); }
+
+.gitRef.gerrit .gg-status{
+	margin:2px;
+	font-size:9px;
+	opacity:0.75;
+}
+
+.gitRef.gerrit .gg-status.merged{ color:var(--gg-merged); }
+.gitRef.gerrit .gg-status.abandoned{ color:var(--gg-rejected); text-decoration:none; }
+.gitRef.gerrit .gg-status.wip{ color:var(--gg-disapproval-weak); }
 
 /* Vertically centred with the .gitRef badges next to it (badge box: margin-top 2px + 18px height + 1px borders => centre at 12px; chip box: 14px + 1px borders => margin-top 4px) */
-.gg-meta-chip {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex-shrink: 0; /* keep the fixed 14px square even when the description column overflows (same as .gitRef / .commitHeadDot) */
-	margin: 4px 0 0 0;
-	width: 14px;
-	height: 14px;
-	border: 1px solid rgba(139, 148, 158, 0.5);
-	border-radius: 3px;
-	background: transparent;
-	cursor: pointer;
-	white-space: nowrap;
-	overflow: hidden;
+.gg-meta-chip{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	flex-shrink:0; /* keep the fixed 14px square even when the description column overflows (same as .gitRef / .commitHeadDot) */
+	margin:4px 0 0 0;
+	width:14px;
+	height:14px;
+	border:1px solid var(--gg-muted-border);
+	border-radius:3px;
+	background:transparent;
+	cursor:pointer;
+	white-space:nowrap;
+	overflow:hidden;
 }
 
-.gg-meta-chip svg {
-	width: 10px;
-	height: 10px;
-	fill: rgba(139, 148, 158, 0.9);
-	transition: transform 0.1s ease-in-out;
+.gg-meta-chip svg{
+	width:10px;
+	height:10px;
+	fill:var(--gg-muted-foreground);
+	transition:transform 0.1s ease-in-out;
 }
 
-.gg-meta-chip:hover, .gg-meta-chip.expanded {
-	background-color: rgba(139, 148, 158, 0.2);
-	border-color: var(--vscode-editor-foreground);
+.gg-meta-chip:hover, .gg-meta-chip.expanded{
+	background-color:var(--gg-muted-hover);
+	border-color:var(--vscode-editor-foreground);
 }
 
-.gg-meta-chip:hover svg, .gg-meta-chip.expanded svg {
-	fill: var(--vscode-editor-foreground);
+.gg-meta-chip:hover svg, .gg-meta-chip.expanded svg{
+	fill:var(--vscode-editor-foreground);
 }
 
-.gg-meta-chip.expanded svg {
-	transform: rotate(180deg);
+.gg-meta-chip.expanded svg{
+	transform:rotate(180deg);
 }
 
 #gerritControls{
@@ -1128,7 +1183,10 @@ body.tagLabelsRightAligned .tagsWrapper {
 	left:0;
 	right:0;
 	top:0;
-	padding:2px 132px 2px 0;
+	white-space:nowrap;
+	overflow-x:auto;
+	overflow-y:hidden;
+	padding:2px 0;
 	background-color: var(--vscode-editor-background);
 	border-bottom:1px solid rgba(128,128,128,0.35);
 	line-height:24px;
@@ -1139,308 +1197,326 @@ body.tagLabelsRightAligned .tagsWrapper {
 	user-select:none;
 }
 
-#gerritControls.sticky {
-	position:sticky;
-	z-index:12;
+/* When the Gerrit row is visible, merge the two header rows into a single bar */
+#controls.withGerritRow {
+	border-bottom:none;
 }
 
 .gerritRowLabel {
 	margin: 0 10px 0 4px;
 }
 
-#gerritShowRefsControl{
-	display:inline-block;
-	white-space:nowrap;
-	margin:0 10px;
-	font-weight:400;
-}
-
-#gerritShowRefsControl > .customCheckbox{
-	margin-right:6px;
-}
-
 .gerritFilterChip {
-	display: inline-block;
-	margin: 0 2px;
-	padding: 0 6px;
-	font-size: 10px;
-	line-height: 16px;
-	border: 1px solid var(--vscode-panel-border, #444);
-	border-radius: 8px;
-	opacity: 0.55;
-	cursor: pointer;
-	-webkit-user-select: none;
-	user-select: none;
-	vertical-align: middle;
+	display:inline-block;
+	margin:0 2px;
+	padding:0 6px;
+	font-size:10px;
+	line-height:16px;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:8px;
+	opacity:0.55;
+	cursor:pointer;
+	-webkit-user-select:none;
+	user-select:none;
+	vertical-align:middle;
 }
 
-.gerritFilterChip:hover { opacity: 0.85; }
+.gerritFilterChip:hover { opacity:0.85; }
 
 .gerritFilterChip.active {
-	opacity: 1;
-	border-color: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	background-color: var(--vscode-button-background);
+	opacity:1;
+	border-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+	background-color:var(--vscode-button-background);
+}
+
+body.vscode-high-contrast .gerritFilterChip.active {
+	outline:1px solid var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
 }
 
 #gerritSubmitBtn {
-	display: inline-block;
-	vertical-align: middle;
-	margin-left: 12px;
-	padding: 0 10px;
-	line-height: 20px;
-	font-size: 11px;
-	font-weight: 700;
-	border: 1px solid var(--vscode-button-background);
-	border-radius: 3px;
-	background-color: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	cursor: pointer;
-	white-space: nowrap;
+	display:inline-block;
+	vertical-align:middle;
+	margin-left:12px;
+	padding:0 10px;
+	line-height:20px;
+	font-size:11px;
+	font-weight:700;
+	border:1px solid var(--vscode-button-background);
+	border-radius:3px;
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+	cursor:pointer;
+	white-space:nowrap;
 }
 
 #gerritSubmitBtn svg {
-	fill: currentColor;
-	vertical-align: -4px;
-	margin-right: 4px;
-	width: 13px;
-	height: 13px;
+	fill:currentColor;
+	vertical-align:-4px;
+	margin-right:4px;
+	width:13px;
+	height:13px;
 }
 
-#gerritSubmitBtn:hover { background-color: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+#gerritSubmitBtn:hover { background-color:var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
 
 #gerritAmendBtn {
-	display: inline-block;
-	vertical-align: middle;
-	margin-left: 12px;
-	padding: 0 10px;
-	line-height: 20px;
-	font-size: 11px;
-	font-weight: 700;
-	border: 1px solid var(--vscode-panel-border, #444);
-	border-radius: 3px;
-	background-color: transparent;
-	color: var(--vscode-editor-foreground);
-	cursor: pointer;
-	white-space: nowrap;
+	display:inline-block;
+	vertical-align:middle;
+	margin-left:12px;
+	padding:0 10px;
+	line-height:20px;
+	font-size:11px;
+	font-weight:700;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:3px;
+	background-color:transparent;
+	color:var(--vscode-editor-foreground);
+	cursor:pointer;
+	white-space:nowrap;
 }
 
 #gerritAmendBtn svg {
-	fill: currentColor;
-	vertical-align: -3px;
-	margin-right: 4px;
-	width: 11px;
-	height: 13px;
+	fill:currentColor;
+	vertical-align:-3px;
+	margin-right:4px;
+	width:11px;
+	height:13px;
 }
 
-#gerritAmendBtn:hover { border-color: var(--vscode-button-background); color: var(--vscode-button-foreground, var(--vscode-editor-foreground)); }
+#gerritAmendBtn:hover { border-color:var(--vscode-button-background); color:var(--vscode-button-foreground, var(--vscode-editor-foreground)); }
 
 
 #gerritClearRefsBtn {
-	display: inline-block;
-	vertical-align: middle;
-	margin-left: 8px;
-	padding: 0 10px;
-	line-height: 20px;
-	font-size: 11px;
-	font-weight: 700;
-	border: 1px solid var(--vscode-panel-border, #444);
-	border-radius: 3px;
-	background-color: transparent;
-	color: var(--vscode-editor-foreground);
-	cursor: pointer;
-	white-space: nowrap;
+	display:inline-block;
+	vertical-align:middle;
+	margin-left:8px;
+	padding:0 10px;
+	line-height:20px;
+	font-size:11px;
+	font-weight:700;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:3px;
+	background-color:transparent;
+	color:var(--vscode-editor-foreground);
+	cursor:pointer;
+	white-space:nowrap;
 }
 
 #gerritClearRefsBtn svg {
-	fill: currentColor;
-	vertical-align: -3px;
-	margin-right: 4px;
-	width: 11px;
-	height: 13px;
+	fill:currentColor;
+	vertical-align:-3px;
+	margin-right:4px;
+	width:11px;
+	height:13px;
 }
 
-#gerritClearRefsBtn:hover { border-color: var(--vscode-inputValidation-errorBorder, #be1100); color: var(--vscode-errorForeground, #f14c4c); }
+#gerritClearRefsBtn:hover { border-color:var(--vscode-inputValidation-errorBorder, #be1100); color:var(--vscode-errorForeground, #f14c4c); }
 
 /* In-table Gerrit meta event rows (anchored under the change's commit) */
 tr.gg-meta-row td {
-	padding: 0 0 0 24px;
-	height: 18px;
-	font-size: 11px;
-	line-height: 18px;
-	color: rgba(139, 148, 158, 0.95);
-	border-left: 2px dashed rgba(139, 148, 158, 0.55);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	padding:0 0 0 24px;
+	height:18px;
+	font-size:11px;
+	line-height:18px;
+	color:var(--gg-muted-foreground);
+	border-left:2px dashed var(--gg-muted-border);
+	white-space:nowrap;
+	overflow:hidden;
+	text-overflow:ellipsis;
 }
 
 tr.gg-meta-row:first-of-type td {
-	border-top: 2px solid transparent;
+	border-top:2px solid transparent;
 }
 
 tr.gg-meta-row:last-of-type td {
-	border-bottom: 2px dashed rgba(139, 148, 158, 0.55);
-	border-left: 2px dashed rgba(139, 148, 158, 0.55);
+	border-bottom:2px dashed var(--gg-muted-border);
+	border-left:2px dashed var(--gg-muted-border);
 }
 
 .gg-meta-event {
-	display: flex;
-	align-items: baseline;
-	white-space: nowrap;
-	overflow: hidden;
+	display:flex;
+	align-items:baseline;
+	white-space:nowrap;
+	overflow:hidden;
 }
 
 .gg-meta-event-icon {
-	flex: 0 0 auto;
-	margin-right: 4px;
-	opacity: 0.8;
+	flex:0 0 auto;
+	margin-right:4px;
+	opacity:0.8;
 }
 
 .gg-meta-event-text {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	flex:1 1 auto;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
 }
 
 .gg-meta-event-reviewer {
-	flex: 0 1 auto;
-	min-width: 4em;
-	margin-left: 6px;
-	text-align: right;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	opacity: 0.7;
-	font-style: italic;
+	flex:0 1 auto;
+	min-width:4em;
+	margin-left:6px;
+	text-align:right;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	opacity:0.7;
+	font-style:italic;
 }
 
 .gg-meta-event-date {
-	flex: 0 0 auto;
-	margin-left: 6px;
-	min-width: 8.5em;
-	text-align: right;
-	font-variant-numeric: tabular-nums;
-	opacity: 0.6;
+	flex:0 0 auto;
+	margin-left:6px;
+	min-width:8.5em;
+	text-align:right;
+	font-variant-numeric:tabular-nums;
+	opacity:0.6;
 }
 
 .gg-timeline {
-	margin-top: 10px;
-	padding-left: 4px;
-	border-left: 2px dashed rgba(139, 148, 158, 0.55);
+	margin-top:10px;
+	padding-left:4px;
+	border-left:2px dashed var(--gg-muted-border);
 }
 
 .gg-event {
-	position: relative;
-	padding: 1px 0 1px 14px;
-	font-size: 11px;
-	border-radius: 3px;
+	position:relative;
+	padding:1px 0 1px 14px;
+	font-size:11px;
+	border-radius:3px;
 }
 
 .gg-event-expandable {
-	cursor: pointer;
+	cursor:pointer;
 }
 
 .gg-event-expandable:hover {
-	background-color: rgba(139, 148, 158, 0.14);
+	background-color:var(--gg-muted-detail);
 }
 
 .gg-event::before {
-	content: '';
-	position: absolute;
-	left: -4px;
-	top: 8px;
-	width: 6px;
-	height: 6px;
-	border-radius: 3px;
-	background-color: rgba(139, 148, 158, 0.8);
+	content:'';
+	position:absolute;
+	left:-4px;
+	top:8px;
+	width:6px;
+	height:6px;
+	border-radius:3px;
+	background-color:var(--gg-muted-foreground);
 }
 
 .gg-event-row {
-	display: flex;
-	align-items: baseline;
-	white-space: nowrap;
+	display:flex;
+	align-items:baseline;
+	white-space:nowrap;
 }
 
 .gg-event-toggle {
-	flex: 0 0 auto;
-	width: 12px;
-	height: 12px;
-	margin-right: 2px;
-	opacity: 0.45;
-	transition: transform 0.1s ease-in;
-	transform: rotate(-90deg);
+	flex:0 0 auto;
+	width:12px;
+	height:12px;
+	margin-right:2px;
+	opacity:0.45;
+	transition:transform 0.1s ease-in;
+	transform:rotate(-90deg);
 }
 
 .gg-event-toggle svg {
-	width: 12px;
-	height: 12px;
-	fill: rgba(139, 148, 158, 0.9);
-	display: block;
+	width:12px;
+	height:12px;
+	fill:var(--gg-muted-foreground);
+	display:block;
 }
 
 .gg-event.expanded .gg-event-toggle {
-	transform: rotate(0deg);
-	opacity: 0.8;
+	transform:rotate(0deg);
+	opacity:0.8;
 }
 
 .gg-event-detail {
-	display: none;
-	margin: 3px 0 4px 18px;
-	padding: 5px 8px;
-	border-radius: 3px;
-	background-color: rgba(139, 148, 158, 0.12);
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 10px;
-	line-height: 1.45;
-	white-space: pre-wrap;
-	word-break: break-word;
-	user-select: text;
-	cursor: auto;
-	max-height: 220px;
-	overflow-y: auto;
+	display:none;
+	margin:3px 0 4px 18px;
+	padding:5px 8px;
+	border-radius:3px;
+	background-color:var(--gg-muted-detail-background);
+	font-family:var(--vscode-editor-font-family, monospace);
+	font-size:10px;
+	line-height:1.45;
+	white-space:pre-wrap;
+	word-break:break-word;
+	user-select:text;
+	cursor:auto;
+	max-height:220px;
+	overflow-y:auto;
+}
+
+body.vscode-high-contrast .gg-event-detail {
+	outline:1px solid var(--vscode-contrastBorder);
 }
 
 .gg-event.expanded .gg-event-detail {
-	display: block;
+	display:block;
 }
 
 .gg-event-icon {
-	flex: 0 0 auto;
-	margin-right: 4px;
-	opacity: 0.8;
+	flex:0 0 auto;
+	margin-right:4px;
+	opacity:0.8;
 }
 
 .gg-event-text {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	flex:1 1 auto;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
 }
 
 .gg-event-reviewer {
-	flex: 0 1 auto;
-	min-width: 4em;
-	margin-left: 6px;
-	text-align: right;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	opacity: 0.7;
-	font-style: italic;
+	flex:0 1 auto;
+	min-width:4em;
+	margin-left:6px;
+	text-align:right;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	opacity:0.7;
+	font-style:italic;
 }
 
 .gg-event-date {
-	flex: 0 0 auto;
-	margin-left: 6px;
-	min-width: 8.5em;
-	text-align: right;
-	font-variant-numeric: tabular-nums;
-	opacity: 0.6;
+	flex:0 0 auto;
+	margin-left:6px;
+	min-width:8.5em;
+	text-align:right;
+	font-variant-numeric:tabular-nums;
+	opacity:0.6;
 }
 
 .gg-hint {
-	display: block;
-	margin-top: 8px;
-	font-size: 10px;
-	opacity: 0.6;
+	display:block;
+	margin-top:8px;
+	font-size:10px;
+	opacity:0.6;
+}
+
+/* Narrow views: keep the control rows usable when the view is too narrow to fit every control */
+@media screen and (max-width: 640px) {
+	.dropdownCurrentValue{
+		max-width:9vw;
+	}
+	#controls.singleRepo .dropdownCurrentValue{
+		max-width:13vw;
+	}
+	/* Hide the Authors filter dropdown so that the "Show Remote Branches" checkbox is not covered by the right-aligned buttons */
+	#authorControl{
+		display:none;
+	}
+	.gerritRowLabel{
+		display:none;
+	}
+	#gerritSubmitBtn, #gerritAmendBtn, #gerritClearRefsBtn{
+		margin-left:4px;
+		margin-right:4px;
+	}
 }

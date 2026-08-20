@@ -17,6 +17,32 @@ body.vscode-high-contrast .dialog{
 	border-color:var(--vscode-menu-border, rgba(128,128,128,0.5));
 }
 
+/* An ✕ close icon shown in the top-right corner of a dialog (in place of the bottom Close button) */
+#dialogCloseIcon{
+	position:absolute;
+	top:4px;
+	right:6px;
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:20px;
+	height:20px;
+	cursor:pointer;
+	border-radius:3px;
+	background-color:var(--vscode-menu-background);
+	color:var(--vscode-menu-foreground);
+	opacity:0.7;
+	z-index:10;
+}
+#dialogCloseIcon:hover{
+	opacity:1;
+	background-color:var(--vscode-menu-selectionBackground);
+	color:var(--vscode-menu-selectionForeground);
+}
+#dialogCloseIcon svg{
+	fill:currentColor;
+}
+
 .dialogContent{
 	display:block;
 	overflow-y:auto;

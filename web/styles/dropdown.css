@@ -58,6 +58,8 @@
 	overflow-x:hidden;
 	margin-top:-1px;
 	white-space:nowrap;
+	min-width:max(240px, 100%);
+	max-width:60vw;
 }
 
 .dropdownOption{

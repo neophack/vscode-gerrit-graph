@@ -60,8 +60,11 @@ export class BufferedQueue<T> extends Disposable {
 	 */
 	private async run() {
 		this.processing = true;
-		let item, changes = false;
-		while (item = this.queue.shift()) {
+		let changes = false;
+		// Process every queued item: the loop is guarded by the queue length (rather than the
+		// truthiness of the shifted item) so that falsy items (e.g. empty strings) aren't skipped
+		while (this.queue.length > 0) {
+			const item = this.queue.shift()!;
 			if (await this.onItem(item)) {
 				changes = true;
 			}

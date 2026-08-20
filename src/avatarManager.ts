@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as https from 'https';
 import { URL } from 'url';
+import { getConfig } from './config';
 import { DataSource } from './dataSource';
 import { ExtensionState } from './extensionState';
 import { Logger } from './logger';
@@ -228,7 +229,7 @@ export class AvatarManager extends Disposable {
 
 		https.get({
 			hostname: 'api.github.com', path: '/repos/' + owner + '/' + repo + '/commits/' + avatarRequest.commits[commitIndex],
-			headers: { 'User-Agent': 'vscode-git-graph' },
+			headers: { 'User-Agent': 'gerrit-graph' },
 			agent: false, timeout: 15000
 		}, (res) => {
 			let respBody = '';
@@ -241,8 +242,14 @@ export class AvatarManager extends Disposable {
 				}
 
 				if (res.statusCode === 200) { // Success
-					let commit: any = JSON.parse(respBody);
-					if (commit.author && commit.author.avatar_url) { // Avatar url found
+					let commit: any;
+					try {
+						commit = JSON.parse(respBody);
+					} catch (error) {
+						this.logger.log('GitHub API returned a malformed response for ' + maskEmail(avatarRequest.email));
+						commit = null;
+					}
+					if (commit && commit.author && commit.author.avatar_url) { // Avatar url found
 						let img = await this.downloadAvatarImage(avatarRequest.email, commit.author.avatar_url + '&size=162');
 						if (img !== null) {
 							this.saveAvatar(avatarRequest.email, img, false);
@@ -296,9 +303,17 @@ export class AvatarManager extends Disposable {
 			}
 		};
 
+		// A Personal Access Token is optional: unauthenticated requests use a lower rate limit,
+		// but no credentials are shipped with the extension
+		const headers: { [header: string]: string } = { 'User-Agent': 'gerrit-graph' };
+		const gitlabToken = getConfig().gitlabToken;
+		if (gitlabToken !== '') {
+			headers['Private-Token'] = gitlabToken;
+		}
+
 		https.get({
-			hostname: 'gitlab.com', path: '/api/v4/users?search=' + avatarRequest.email,
-			headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' }, // Token only has read access
+			hostname: 'gitlab.com', path: '/api/v4/users?search=' + encodeURIComponent(avatarRequest.email),
+			headers: headers,
 			agent: false, timeout: 15000
 		}, (res) => {
 			let respBody = '';
@@ -311,8 +326,14 @@ export class AvatarManager extends Disposable {
 				}
 
 				if (res.statusCode === 200) { // Success
-					let users: any = JSON.parse(respBody);
-					if (users.length > 0 && users[0].avatar_url) { // Avatar url found
+					let users: any;
+					try {
+						users = JSON.parse(respBody);
+					} catch (error) {
+						this.logger.log('GitLab API returned a malformed response for ' + maskEmail(avatarRequest.email));
+						users = [];
+					}
+					if (Array.isArray(users) && users.length > 0 && users[0].avatar_url) { // Avatar url found
 						let img = await this.downloadAvatarImage(avatarRequest.email, users[0].avatar_url);
 						if (img !== null) {
 							this.saveAvatar(avatarRequest.email, img, false);
@@ -379,17 +400,25 @@ export class AvatarManager extends Disposable {
 
 			https.get({
 				hostname: imgUrl.hostname, path: imgUrl.pathname + imgUrl.search,
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false, timeout: 15000
 			}, (res) => {
 				let imageBufferArray: Buffer[] = [];
 				res.on('data', (chunk: Buffer) => { imageBufferArray.push(chunk); });
 				res.on('end', () => {
 					if (res.statusCode === 200) { // If success response, save the image to the avatar folder
-						let format = res.headers['content-type']!.split('/')[1];
-						fs.writeFile(this.avatarStorageFolder + '/' + hash + '.' + format, Buffer.concat(imageBufferArray), err => {
-							complete(err ? null : hash + '.' + format);
-						});
+						const contentType = res.headers['content-type'];
+						// Only accept recognised image content types, so that the file extension is a known image format
+						let format = typeof contentType === 'string' ? contentType.split('/')[1] : undefined;
+						if (format !== undefined && ['jpeg', 'jpg', 'png', 'gif', 'webp', 'x-ms-bmp', 'svg+xml'].indexOf(format) > -1) {
+							format = format === 'svg+xml' ? 'svg' : (format === 'x-ms-bmp' ? 'bmp' : format);
+							fs.writeFile(this.avatarStorageFolder + '/' + hash + '.' + format, Buffer.concat(imageBufferArray), err => {
+								complete(err ? null : hash + '.' + format);
+							});
+						} else {
+							this.logger.log('Avatar from ' + imgUrl.hostname + ' had an unsupported content type "' + contentType + '" for ' + maskEmail(email));
+							complete();
+						}
 					} else {
 						complete();
 					}

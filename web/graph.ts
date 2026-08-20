@@ -538,8 +538,8 @@ class Graph {
 	 * @returns TRUE => Commit can be dropped, FALSE => Commit can't be dropped
 	 */
 	public dropCommitPossible(i: number) {
-		if (!this.vertices[i].hasParents()) {
-			return false; // No parents
+		if (this.vertices[i] === undefined || !this.vertices[i].hasParents()) {
+			return false; // No vertex (e.g. the commit is no longer loaded), or no parents
 		}
 
 		const isPossible = (v: Vertex): boolean | null => {

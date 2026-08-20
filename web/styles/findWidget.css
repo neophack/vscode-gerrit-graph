@@ -1,14 +1,16 @@
 .findWidget{
-	display:block;
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
 	position:fixed;
 	top:-42px;
 	right:28px;
+	max-width:calc(100vw - 56px);
 	height:34px;
 	padding:0 10px;
 	z-index:21;
 	background-color:var(--vscode-editorWidget-background);
 	box-shadow:0 2px 8px var(--vscode-widget-shadow);
-	line-height:34px;
 	font-size:13px;
 	color:var(--vscode-editorSuggestWidget-foreground);
 	fill:var(--vscode-editorSuggestWidget-foreground);
@@ -28,9 +30,13 @@
 	content:attr(data-error);
 	position:relative;
 	display:block;
-	top:-5px;
+	order:99;
+	flex-basis:100%;
+	top:0;
 	left:0;
-	width:201px;
+	box-sizing:border-box;
+	max-width:100%;
+	margin-bottom:5px;
 	padding:5px;
 	font-size:12px;
 	line-height:16px;
@@ -42,7 +48,8 @@
 #findInput{
 	display:inline-block;
 	vertical-align:top;
-	margin-top:4px;
+	flex:0 1 auto;
+	min-width:48px;
 	padding:5px 47px 5px 5px;
 	border:0;
 	height:16px;
@@ -60,9 +67,10 @@
 }
 
 .findModifier{
-	display:block;
-	position:absolute;
-	top:7px;
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	flex:0 0 auto;
 	height:20px;
 	width:20px;
 	line-height:20px;
@@ -83,10 +91,10 @@
 	opacity:1;
 }
 #findCaseSensitive{
-	left:176px;
+	margin-left:-47px;
 }
 #findRegex{
-	left:198px;
+	margin-left:1px;
 	font-size:12px;
 }
 
@@ -96,15 +104,18 @@
 	user-select:none;
 }
 #findPosition{
-	min-width:75px;
+	flex:0 1 auto;
+	min-width:48px;
+	overflow:hidden;
+	text-overflow:ellipsis;
 	margin-left:10px;
 }
 #findPrev, #findNext, #findOpenCdv, #findClose{
 	position:relative;
+	flex:0 0 auto;
 	width:20px;
 	height:20px;
-	vertical-align:top;
-	margin:7px 0 0 6px;
+	margin:0 0 0 6px;
 	cursor:pointer;
 }
 #findPrev svg, #findNext svg, #findOpenCdv svg{

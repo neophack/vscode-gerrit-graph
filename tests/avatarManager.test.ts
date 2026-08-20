@@ -129,14 +129,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'api.github.com',
 					path: '/repos/mhutchie/test-repo/commits/1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/&size=162',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -179,14 +179,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'api.github.com',
 					path: '/repos/mhutchie/test-repo/commits/2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/&size=162',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -220,14 +220,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'api.github.com',
 					path: '/repos/mhutchie/test-repo/commits/1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -261,14 +261,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'api.github.com',
 					path: '/repos/mhutchie/test-repo/commits/1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -298,14 +298,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'api.github.com',
 					path: '/repos/mhutchie/test-repo/commits/1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/&size=162',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -497,7 +497,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/path/to/img?w=100&size=162',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -548,15 +548,15 @@ describe('AvatarManager', () => {
 				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'gitlab.com',
-					path: '/api/v4/users?search=user4@mhutchie.com',
-					headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' },
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -567,6 +567,56 @@ describe('AvatarManager', () => {
 					timestamp: 1587559258000,
 					identicon: false
 				});
+			});
+
+			it('Should send the configured GitLab Personal Access Token with the GitLab API request', async () => {
+				// Setup
+				vscode.mockExtensionSettingReturnValue('avatars.gitlabToken', 'my-personal-token');
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://gitlab.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '[{"avatar_url":"https://avatar-url/"}]');
+				mockHttpsResponse(200, 'binary-image-data');
+				mockWriteFile(null);
+				mockReadFile('binary-image-data');
+				const avatarEvents = waitForEvents(avatarManager, 1);
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert
+				await avatarEvents;
+				expect(spyOnHttpsGet).toHaveBeenCalledWith({
+					hostname: 'gitlab.com',
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph', 'Private-Token': 'my-personal-token' },
+					agent: false,
+					timeout: 15000
+				}, expect.anything());
+			});
+
+			it('Should fallback to Gravatar when the GitLab API returns a malformed response', async () => {
+				// Setup: a non-JSON body (e.g. a proxy error page) must not crash the manager
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://gitlab.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '<html>proxy error page</html>');
+				mockHttpsResponse(200, 'binary-image-data');
+				mockWriteFile(null);
+				mockReadFile('binary-image-data');
+				const avatarEvents = waitForEvents(avatarManager, 1);
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert: the malformed response is treated as "no user found", falling back to Gravatar
+				expect(await avatarEvents).toStrictEqual([{
+					email: 'user4@mhutchie.com',
+					image: 'data:image/png;base64,YmluYXJ5LWltYWdlLWRhdGE='
+				}]);
+				expect(spyOnHttpsGet).toHaveBeenCalledWith({
+					hostname: 'secure.gravatar.com',
+					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
+					headers: { 'User-Agent': 'gerrit-graph' },
+					agent: false,
+					timeout: 15000
+				}, expect.anything());
 			});
 
 			it('Should fetch a new avatar from GitLab (SSH Remote)', async () => {
@@ -589,15 +639,15 @@ describe('AvatarManager', () => {
 				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'gitlab.com',
-					path: '/api/v4/users?search=user4@mhutchie.com',
-					headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' },
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -630,15 +680,15 @@ describe('AvatarManager', () => {
 				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'gitlab.com',
-					path: '/api/v4/users?search=user4@mhutchie.com',
-					headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' },
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -671,15 +721,15 @@ describe('AvatarManager', () => {
 				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'gitlab.com',
-					path: '/api/v4/users?search=user4@mhutchie.com',
-					headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' },
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -708,15 +758,15 @@ describe('AvatarManager', () => {
 				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'gitlab.com',
-					path: '/api/v4/users?search=user4@mhutchie.com',
-					headers: { 'User-Agent': 'vscode-git-graph', 'Private-Token': 'w87U_3gAxWWaPtFgCcus' },
+					path: '/api/v4/users?search=user4%40mhutchie.com',
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -759,7 +809,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/path/to/img?w=100&h=100',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -935,7 +985,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -950,7 +1000,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -984,14 +1034,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1021,14 +1071,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1053,7 +1103,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1086,7 +1136,7 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1121,14 +1171,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1162,14 +1212,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1203,14 +1253,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1244,14 +1294,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1288,14 +1338,14 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'secure.gravatar.com',
 					path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=identicon',
-					headers: { 'User-Agent': 'vscode-git-graph' },
+					headers: { 'User-Agent': 'gerrit-graph' },
 					agent: false,
 					timeout: 15000
 				}, expect.anything());
@@ -1336,7 +1386,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/57853c107d1aeaa7da6f3096385cb848?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1377,7 +1427,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/57853c107d1aeaa7da6f3096385cb848?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1417,7 +1467,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/e36b61e2afd912d3665f1aa92932aa87?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1461,7 +1511,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1475,7 +1525,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/da4173f868c17bcd6353cdba41070ca9?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1510,7 +1560,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/530a7b02594e057f39179d3bd8b849f0?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1543,7 +1593,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());
@@ -1573,7 +1623,7 @@ describe('AvatarManager', () => {
 			expect(spyOnHttpsGet).toHaveBeenCalledWith({
 				hostname: 'secure.gravatar.com',
 				path: '/avatar/0ca9d3f228e867bd4feb6d62cc2edbfe?s=162&d=404',
-				headers: { 'User-Agent': 'vscode-git-graph' },
+				headers: { 'User-Agent': 'gerrit-graph' },
 				agent: false,
 				timeout: 15000
 			}, expect.anything());

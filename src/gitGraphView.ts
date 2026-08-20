@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
  * Must be bumped whenever web/ sources change, so that already-open webviews
  * don't keep serving a stale cached out.min.js / out.min.css after an update.
  */
-const MEDIA_CACHE_VERSION = '1.37.32';
+const MEDIA_CACHE_VERSION = '1.38.0';
 
 import { AvatarManager } from './avatarManager';
 import { getConfig } from './config';
@@ -16,8 +16,8 @@ import { buildFetchRefspecs, changeShard, extractChangeId, filterChangeStates, g
 import { Logger } from './logger';
 import { RepoFileWatcher } from './repoFileWatcher';
 import { RepoManager } from './repoManager';
-import { ErrorInfo, GerritChangeState, GerritStatusFilter, GitConfigLocation, GitGraphViewInitialState, GitPushBranchMode, GitRepoSet, LoadGitGraphViewTo, RequestMessage, ResponseMessage, TabIconColourTheme } from './types';
-import { UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, archive, copyFilePathToClipboard, copyToClipboard, createPullRequest, getNonce, openExtensionSettings, openExternalUrl, openFile, showErrorMessage, viewDiff, viewDiffWithWorkingFile, viewFileAtRevision, viewScm } from './utils';
+import { ErrorInfo, GerritChangeState, GerritStatusFilter, GitConfigLocation, GitGraphViewInitialState, GitPushBranchMode, GitRepoSet, LoadGitGraphViewTo, RequestLoadCommits, RequestMessage, ResponseMessage, TabIconColourTheme } from './types';
+import { UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, archive, copyFilePathToClipboard, copyToClipboard, createPullRequest, encodeJsonForInlineScript, getNonce, isSafeRefName, isValidCommitHash, openExtensionSettings, openExternalUrl, openFile, showErrorMessage, viewDiff, viewDiffWithWorkingFile, viewFileAtRevision, viewScm } from './utils';
 import { Disposable, toDisposable } from './utils/disposable';
 
 /**
@@ -62,7 +62,7 @@ export class GitGraphView extends Disposable {
 	 * @param extensionPath The absolute file path of the directory containing the extension.
 	 * @param dataSource The Git Graph DataSource instance.
 	 * @param extensionState The Git Graph ExtensionState instance.
-	 * @param avatarManger The Git Graph AvatarManager instance.
+	 * @param avatarManager The Git Graph AvatarManager instance.
 	 * @param repoManager The Git Graph RepoManager instance.
 	 * @param logger The Git Graph Logger instance.
 	 * @param loadViewTo What to load the view to.
@@ -93,7 +93,7 @@ export class GitGraphView extends Disposable {
 	 * @param extensionPath The absolute file path of the directory containing the extension.
 	 * @param dataSource The Git Graph DataSource instance.
 	 * @param extensionState The Git Graph ExtensionState instance.
-	 * @param avatarManger The Git Graph AvatarManager instance.
+	 * @param avatarManager The Git Graph AvatarManager instance.
 	 * @param repoManager The Git Graph RepoManager instance.
 	 * @param logger The Git Graph Logger instance.
 	 * @param loadViewTo What to load the view to.
@@ -207,6 +207,23 @@ export class GitGraphView extends Disposable {
 	 */
 	private async respondToMessage(msg: RequestMessage) {
 		this.repoFileWatcher.mute();
+
+		try {
+			await this.handleMessage(msg);
+		} catch (error) {
+			this.logger.logError('Failed to handle "' + msg.command + '" message: ' + error);
+			showErrorMessage('Gerrit Graph encountered an error while handling this action.');
+		} finally {
+			this.repoFileWatcher.unmute();
+		}
+	}
+
+	/**
+	 * Handle a message sent from the front-end.
+	 * Any error thrown by a handler is caught and logged by `respondToMessage`.
+	 * @param msg The message that was received.
+	 */
+	private async handleMessage(msg: RequestMessage) {
 		let errorInfos: ErrorInfo[];
 
 		switch (msg.command) {
@@ -272,8 +289,8 @@ export class GitGraphView extends Disposable {
 					error: await this.dataSource.cleanUntrackedFiles(msg.repo, msg.directories)
 				});
 				break;
-			case 'commitDetails':
-				let data = await Promise.all<GitCommitDetailsData, string | null>([
+			case 'commitDetails': {
+				const data = await Promise.all<GitCommitDetailsData, string | null>([
 					msg.commitHash === UNCOMMITTED
 						? this.dataSource.getUncommittedDetails(msg.repo)
 						: msg.stash === null
@@ -289,6 +306,7 @@ export class GitGraphView extends Disposable {
 					refresh: msg.refresh
 				});
 				break;
+			}
 			case 'compareCommits':
 				this.sendMessage({
 					command: 'compareCommits',
@@ -441,17 +459,48 @@ export class GitGraphView extends Disposable {
 					error: await this.dataSource.fetchIntoLocalBranch(msg.repo, msg.remote, msg.remoteBranch, msg.localBranch, msg.force)
 				});
 				break;
-			case 'loadCommits':
+			case 'loadCommits': {
 				this.loadCommitsRefreshId = msg.refreshId;
-				const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, msg.gerritForceRefresh === true);
-				this.sendMessage({
-					command: 'loadCommits',
-					refreshId: msg.refreshId,
-					onlyFollowFirstParent: msg.onlyFollowFirstParent,
-					gerritStates: gerritData !== null ? gerritData.states : null,
-					...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null)
-				});
+				const config = getConfig().gerrit;
+				const gerritShowChangeRefs = config.showChangeRefs;
+				if (!config.enabled || config.fetchMode === 'off') {
+					// Gerrit integration disabled: load the commits without any Gerrit data
+					this.sendMessage({
+						command: 'loadCommits',
+						refreshId: msg.refreshId,
+						onlyFollowFirstParent: msg.onlyFollowFirstParent,
+						gerritStates: null,
+						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+					});
+				} else if (this.gerritCache.has(msg.repo) && msg.gerritForceRefresh !== true) {
+					// The Gerrit data is already cached: serve it instantly from the cache
+					const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, false);
+					this.sendMessage({
+						command: 'loadCommits',
+						refreshId: msg.refreshId,
+						onlyFollowFirstParent: msg.onlyFollowFirstParent,
+						gerritStates: gerritData !== null ? gerritData.states : null,
+						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+					});
+				} else {
+					// The Gerrit data isn't cached (or a forced refresh was requested): render the branch
+					// graph IMMEDIATELY with the stale cached Gerrit data (if any), and complete the
+					// Gerrit pipeline asynchronously. This response is marked `gerritPending`, so the
+					// Git Graph View keeps its loading indicator running until the final response with
+					// the fresh Gerrit data arrives.
+					const staleGerritData = this.peekCachedGerritData(msg.repo, msg.gerritStatusFilter);
+					this.sendMessage({
+						command: 'loadCommits',
+						refreshId: msg.refreshId,
+						onlyFollowFirstParent: msg.onlyFollowFirstParent,
+						gerritPending: true,
+						gerritStates: staleGerritData !== null ? staleGerritData.states : null,
+						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, staleGerritData !== null ? staleGerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+					});
+					this.loadCommitsGerritFollowUp(msg, gerritShowChangeRefs); // runs asynchronously (never awaited)
+				}
 				break;
+			}
 			case 'gerritSubmitReview':
 				this.sendMessage({
 					command: 'gerritSubmitReview',
@@ -496,7 +545,7 @@ export class GitGraphView extends Disposable {
 					...await this.dataSource.getConfig(msg.repo, msg.remotes)
 				});
 				break;
-			case 'loadRepoInfo':
+			case 'loadRepoInfo': {
 				this.loadRepoInfoRefreshId = msg.refreshId;
 				let repoInfo = await this.dataSource.getRepoInfo(msg.repo, msg.showRemoteBranches, msg.showStashes, msg.hideRemotes), isRepo = true;
 				if (repoInfo.error) {
@@ -516,6 +565,7 @@ export class GitGraphView extends Disposable {
 					this.repoFileWatcher.start(msg.repo);
 				}
 				break;
+			}
 			case 'loadRepos':
 				if (!msg.check || !await this.repoManager.checkReposExist()) {
 					// If not required to check repos, or no changes were found when checking, respond with repos
@@ -716,8 +766,6 @@ export class GitGraphView extends Disposable {
 				});
 				break;
 		}
-
-		this.repoFileWatcher.unmute();
 	}
 
 	/**
@@ -807,33 +855,35 @@ export class GitGraphView extends Disposable {
 
 		if (this.dataSource.isGitExecutableUnknown()) {
 			body = `<body class="unableToLoad">
-			<h2>Unable to load Git Graph</h2>
+			<h2>Unable to load Gerrit Graph</h2>
 			<p class="unableToLoadMessage">${UNABLE_TO_FIND_GIT_MSG}</p>
 			</body>`;
 		} else if (numRepos > 0) {
 			const stickyClassAttr = initialState.config.stickyHeader ? ' class="sticky"' : '';
 			body = `<body>
 			<div id="view" tabindex="-1">
-				<div id="controls"${stickyClassAttr}>
-					<span id="repoControl"><span class="unselectable">Repo: </span><div id="repoDropdown" class="dropdown"></div></span>
-					<span id="branchControl"><span class="unselectable">Branches: </span><div id="branchDropdown" class="dropdown"></div></span>
-					<span id="authorControl"><span class="unselectable">Authors: </span><div id="authorDropdown" class="dropdown"></div></span>
+				<div id="headerRow"${stickyClassAttr}>
+					<div id="controls">
+						<span id="repoControl"><span class="unselectable">Repo: </span><div id="repoDropdown" class="dropdown"></div></span>
+						<span id="branchControl"><span class="unselectable">Branches: </span><div id="branchDropdown" class="dropdown"></div></span>
+						<span id="authorControl"><span class="unselectable">Authors: </span><div id="authorDropdown" class="dropdown"></div></span>
 
-				<label id="showRemoteBranchesControl"><input type="checkbox" id="showRemoteBranchesCheckbox" tabindex="-1"><span class="customCheckbox"></span>Show Remote Branches</label>
-				<div id="currentBtn" title="Current"></div>
-					<div id="findBtn" title="Find"></div>
-					<div id="terminalBtn" title="Open a Terminal for this Repository"></div>
-					<div id="settingsBtn" title="Repository Settings"></div>
-					<div id="fetchBtn"></div>
-					<div id="refreshBtn"></div>
-				</div>
-				<div id="gerritControls"${stickyClassAttr}>
-					<span class="unselectable gerritRowLabel">Gerrit:</span>
-					<label id="gerritShowRefsControl"><input type="checkbox" id="gerritShowRefsCheckbox" tabindex="-1"><span class="customCheckbox"></span>Show Refs</label>
-					<span id="gerritFilterControl"></span>
-					<div id="gerritAmendBtn" title="Amend a Gerrit Change-Id onto HEAD (only when HEAD has none yet and hasn't been pushed)"></div>
-					<div id="gerritSubmitBtn" title="Submit HEAD for Gerrit Review"></div>
-					<div id="gerritClearRefsBtn" title="Delete all locally downloaded Gerrit change refs (refs/remotes/&lt;remote&gt;/changes/*)"></div>
+					<label id="showRemoteBranchesControl" title="Show Remote Branches: display remote branches in the graph"><input type="checkbox" id="showRemoteBranchesCheckbox" tabindex="-1"><span class="customCheckbox"></span>Remote</label>
+					<div id="currentBtn" title="Current"></div>
+						<div id="findBtn" title="Find"></div>
+						<div id="filterBtn" title="Filter Commits by Path"></div>
+						<div id="terminalBtn" title="Open a Terminal for this Repository"></div>
+						<div id="settingsBtn" title="Repository Settings"></div>
+						<div id="fetchBtn"></div>
+						<div id="refreshBtn"></div>
+					</div>
+					<div id="gerritControls">
+						<span class="unselectable gerritRowLabel">Gerrit:</span>
+						<span id="gerritFilterControl"></span>
+						<div id="gerritAmendBtn" title="Amend a Gerrit Change-Id onto HEAD (only when HEAD has none yet and hasn't been pushed)"></div>
+						<div id="gerritSubmitBtn" title="Submit HEAD for Gerrit Review"></div>
+						<div id="gerritClearRefsBtn" title="Delete all locally downloaded Gerrit change refs (refs/remotes/&lt;remote&gt;/changes/*)"></div>
+					</div>
 				</div>
 				<div id="content">
 					<div id="commitGraph"></div>
@@ -841,12 +891,12 @@ export class GitGraphView extends Disposable {
 				</div>
 				<div id="footer"></div>
 			</div>
-			<script nonce="${nonce}">var initialState = ${JSON.stringify(initialState)}, globalState = ${JSON.stringify(globalState)}, workspaceState = ${JSON.stringify(workspaceState)};</script>
+			<script nonce="${nonce}">var initialState = ${encodeJsonForInlineScript(JSON.stringify(initialState))}, globalState = ${encodeJsonForInlineScript(JSON.stringify(globalState))}, workspaceState = ${encodeJsonForInlineScript(JSON.stringify(workspaceState))};</script>
 			<script nonce="${nonce}" src="${this.getMediaUri('out.min.js')}?v=${MEDIA_CACHE_VERSION}"></script>
 			</body>`;
 		} else {
 			body = `<body class="unableToLoad">
-			<h2>Unable to load Git Graph</h2>
+			<h2>Unable to load Gerrit Graph</h2>
 			<p class="unableToLoadMessage">No Git repositories were found in the current workspace when it was last scanned by Git Graph.</p>
 			<p>If your repositories are in subfolders of the open workspace folder(s), make sure you have set the Git Graph Setting "gerrit-graph.maxDepthOfRepoSearch" appropriately (read the <a href="https://github.com/mhutchie/vscode-git-graph/wiki/Extension-Settings#max-depth-of-repo-search" target="_blank">documentation</a> for more information).</p>
 			<p><div id="rescanForReposBtn" class="roundedBtn">Re-scan the current workspace for repositories</div></p>
@@ -902,7 +952,29 @@ export class GitGraphView extends Disposable {
 			if (fetched !== null) cache = fetched; // on failure, fall back to the last known good cache (if any)
 		}
 		if (cache === null) return null;
+		return this.buildGerritViewData(cache, statusFilter);
+	}
 
+	/**
+	 * Get the Gerrit view data (filtered states + change refs to inject into the commit log) of a
+	 * repository's cache WITHOUT triggering a fetch.
+	 * @param repo The path of the repository.
+	 * @param statusFilter The session status filter from the Git Graph View, or NULL to use the configured default.
+	 * @returns The view data, or NULL if the repository has no Gerrit cache yet.
+	 */
+	private peekCachedGerritData(repo: string, statusFilter: GerritStatusFilter | null): { states: GerritChangeState[], refs: string[] } | null {
+		const cache = this.gerritCache.get(repo);
+		return cache !== undefined ? this.buildGerritViewData(cache, statusFilter) : null;
+	}
+
+	/**
+	 * Derive the Gerrit view data of a cache entry: the states passing the status filter, and the
+	 * change refs to inject into the commit log.
+	 * @param cache The cache entry of the repository.
+	 * @param statusFilter The session status filter from the Git Graph View, or NULL to use the configured default.
+	 */
+	private buildGerritViewData(cache: GerritCacheEntry, statusFilter: GerritStatusFilter | null): { states: GerritChangeState[], refs: string[] } {
+		const config = getConfig().gerrit;
 		const filter = statusFilter !== null ? statusFilter : config.statusFilter;
 		const states = filterChangeStates(cache.states, filter); // filtered changes must not appear in the graph
 		const refs: string[] = [];
@@ -926,6 +998,26 @@ export class GitGraphView extends Disposable {
 	}
 
 	/**
+	 * Complete an asynchronous Gerrit load started by a `loadCommits` request that was already
+	 * answered with the branch graph (marked `gerritPending`), and send the final `loadCommits`
+	 * response once the fresh Gerrit data is available. The response is skipped when a newer load
+	 * request supersedes it (the Git Graph View also guards this by the refresh id).
+	 * @param msg The original `loadCommits` request message.
+	 * @param gerritShowChangeRefs Should the Gerrit change refs be displayed as remote branch refs.
+	 */
+	private async loadCommitsGerritFollowUp(msg: RequestLoadCommits, gerritShowChangeRefs: boolean) {
+		const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, msg.gerritForceRefresh === true);
+		if (this.loadCommitsRefreshId !== msg.refreshId) return; // superseded by a newer load request
+		this.sendMessage({
+			command: 'loadCommits',
+			refreshId: msg.refreshId,
+			onlyFollowFirstParent: msg.onlyFollowFirstParent,
+			gerritStates: gerritData !== null ? gerritData.states : null,
+			...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+		});
+	}
+
+	/**
 	 * Run the Gerrit refresh pipeline: ls-remote probe, targeted fetch, prune and meta parsing.
 	 * The unfiltered result is stored in the Gerrit cache of the repository.
 	 * @param repo The path of the repository.
@@ -940,17 +1032,24 @@ export class GitGraphView extends Disposable {
 				: limitChanges(await gerrit.listRemoteChanges(repo, remote), config.fetchLimit);
 			const entry: GerritCacheEntry = { repo: repo, states: [], patchsets: new Map() };
 			if (changes.size > 0) {
+				// Resolve the change URL base concurrently with the fetch (it doesn't depend on it)
+				const urlBasePromise = gerrit.getChangeUrlBase(repo, remote);
 				const fetchError = await gerrit.fetchChanges(repo, remote, buildFetchRefspecs(changes, remote, config.patchsets));
 				if (fetchError !== null) {
 					this.logger.log('Gerrit fetch failed: ' + fetchError);
 					return null;
 				}
-				await gerrit.pruneLocalChanges(repo, remote, Array.from(changes.keys()));
+				const pruneError = await gerrit.pruneLocalChanges(repo, remote, Array.from(changes.keys()));
+				if (pruneError !== null) this.logger.log('Gerrit ref pruning failed (stale change refs may accumulate): ' + pruneError);
 
-				const urlBase = await gerrit.getChangeUrlBase(repo, remote);
+				// Parse the NoteDb meta histories of all changes concurrently: a single Git command
+				// resolves every meta ref hash (so unchanged metas are served from the cache), and
+				// the remaining histories are parsed by a pool of concurrent Git commands
+				const urlBase = await urlBasePromise;
+				const statesByChange = await gerrit.parseMetas(repo, remote, Array.from(changes.keys()), urlBase);
 				for (const [change, patchsets] of changes) {
-					const state = await gerrit.parseMeta(repo, remote, change, urlBase);
-					if (state === null) continue; // meta ref not available locally
+					const state = statesByChange.get(change);
+					if (state === undefined || state === null) continue; // meta ref not available locally
 					entry.states.push(state);
 					entry.patchsets.set(change, patchsets);
 				}
@@ -1016,6 +1115,10 @@ export class GitGraphView extends Disposable {
 	 * Push a commit to `refs/for/<branch>` for review, amending a Change-Id onto HEAD if required.
 	 */
 	private async gerritSubmitReview(repo: string, hash: string | null, branch: string) {
+		// Validate the untrusted hash and branch before they are passed to git
+		if (hash !== null && !isValidCommitHash(hash)) return { error: 'Invalid commit hash was provided', url: <string | null>null };
+		if (!isSafeRefName(branch)) return { error: 'Invalid reference name was provided', url: <string | null>null };
+
 		const config = getConfig().gerrit, revision = hash !== null ? hash : 'HEAD';
 		try {
 			if (revision === 'HEAD') {
@@ -1134,6 +1237,12 @@ export class GitGraphView extends Disposable {
 	 * Fetch the latest patchset (and meta ref) of a single change.
 	 */
 	private async gerritFetchChange(repo: string, change: number): Promise<ErrorInfo> {
+		// The change number is received from the webview and interpolated into refs, so it must be
+		// validated to be a positive integer
+		if (typeof change !== 'number' || !isFinite(change) || change < 1 || Math.floor(change) !== change) {
+			return 'Invalid change number was provided';
+		}
+
 		const config = getConfig().gerrit;
 		try {
 			const output = await this.dataSource.gitOutput(['ls-remote', config.remote, 'refs/changes/' + changeShard(change) + '/' + change + '/*'], repo, (stdout) => stdout);
@@ -1161,6 +1270,10 @@ export class GitGraphView extends Disposable {
 	 * Create a fixup/squash commit for the target commit and autosquash it via a non-interactive rebase.
 	 */
 	private async gerritAutosquash(repo: string, commitHash: string, mode: 'fixup' | 'squash'): Promise<ErrorInfo> {
+		// The commit hash is passed to git rebase as a bare argument (commitHash + '^'), so it must
+		// be validated to prevent it from being misinterpreted as a git option (e.g. `--exec`)
+		if (!isValidCommitHash(commitHash)) return 'Invalid commit hash was provided';
+
 		let error = await this.dataSource.runGitCommand(['commit', '--' + mode + '=' + commitHash], repo);
 		if (error !== null) return error;
 		error = await this.dataSource.runGitCommand(['-c', 'sequence.editor=true', 'rebase', '-i', '--autosquash', '--autostash', commitHash + '^'], repo);

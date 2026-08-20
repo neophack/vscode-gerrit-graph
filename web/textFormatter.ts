@@ -435,7 +435,7 @@ class TextFormatter {
 					html.push('<a class="', CLASS_EXTERNAL_URL, '" href="', escapeHtml(node.url), '" tabindex="-1">', escapeHtml(node.displayText), '</a>');
 					break;
 				case TF.NodeType.Emoji:
-					html.push(node.emoji);
+					html.push(escapeHtml(node.emoji));
 					break;
 			}
 			nextHtmlIndex = node.end + 1;
@@ -454,7 +454,7 @@ class TextFormatter {
 	public static registerCustomEmojiMappings(mappings: ReadonlyArray<GG.CustomEmojiShortcodeMapping>) {
 		const validShortcodeRegExp = /^:[A-Za-z0-9-_]+:$/;
 		for (let i = 0; i < mappings.length; i++) {
-			if (validShortcodeRegExp.test(mappings[i].shortcode)) {
+			if (validShortcodeRegExp.test(mappings[i].shortcode) && typeof mappings[i].emoji === 'string' && mappings[i].emoji.length > 0 && mappings[i].emoji.length <= 16) {
 				TextFormatter.EMOJI_MAPPINGS[mappings[i].shortcode.substring(1, mappings[i].shortcode.length - 1)] = mappings[i].emoji;
 			}
 		}

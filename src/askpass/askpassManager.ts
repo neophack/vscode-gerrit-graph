@@ -63,8 +63,21 @@ export class AskpassManager extends Disposable {
 		req.setEncoding('utf8');
 		req.on('data', (d) => reqData += d);
 		req.on('end', () => {
-			let data = JSON.parse(reqData) as AskpassRequest;
-			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Git Graph: ' + data.host, password: /password/i.test(data.request), ignoreFocusOut: true }).then(result => {
+			let data: AskpassRequest;
+			try {
+				data = JSON.parse(reqData) as AskpassRequest;
+			} catch (e) {
+				// Malformed request: respond with an error instead of crashing the server callback
+				res.writeHead(400);
+				res.end();
+				return;
+			}
+			if (typeof data.request !== 'string' || typeof data.host !== 'string') {
+				res.writeHead(400);
+				res.end();
+				return;
+			}
+			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Gerrit Graph: ' + data.host, password: /password/i.test(data.request), ignoreFocusOut: true }).then(result => {
 				res.writeHead(200);
 				res.end(JSON.stringify(result || ''));
 			}, () => {

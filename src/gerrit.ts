@@ -7,6 +7,7 @@ import { ErrorInfo, GerritChangeEvent, GerritChangeState, GerritChangeStatus, Ge
 export interface GitRunner {
 	gitOutput: <T>(args: string[], repo: string, resolveValue: { (stdout: string): T }) => Promise<T>;
 	runGitCommand: (args: string[], repo: string) => Promise<ErrorInfo>;
+	runGitCommandWithInput: (args: string[], repo: string, input: string) => Promise<ErrorInfo>;
 }
 
 export interface ParsedChangeRef {
@@ -18,6 +19,13 @@ export interface ParsedChangeRef {
 const CHANGE_REF_REGEX = /(?:^|\/)changes\/\d+\/(\d+)\/(meta|\d+)$/;
 const CHANGE_ID_REGEX = /^Change-Id: (I[0-9a-f]{40})\s*$/m;
 const LABEL_FOOTER_REGEX = /^Label: ([A-Za-z0-9-]+)\s*=\s*([+-]?\d+)\s*$/gm;
+
+/** The maximum number of NoteDb meta histories parsed by concurrent Git commands. */
+const META_PARSE_CONCURRENCY = 8;
+/** The maximum number of parsed NoteDb meta states retained in the in-memory cache (LRU). */
+const META_CACHE_LIMIT = 500;
+/** The default timeout of remote Gerrit operations (ls-remote / fetch), in milliseconds (<= 0 => disabled). */
+const DEFAULT_REMOTE_TIMEOUT_MS = 60000;
 // "Change has been successfully merged by <name>" / "cherry-picked as <hash> by <name>" - the
 // submitter's name follows "by" (optionally after a "as <hash>" re-submit hash), with or without
 // a trailing "<email>"
@@ -395,17 +403,72 @@ export function filterChangeStates(states: GerritChangeState[], filter: { new: b
  */
 export class GerritDataSource {
 	private readonly git: GitRunner;
-	private readonly metaCache = new Map<string, GerritChangeState>(); // key = <repo>|<metaRef>
+	private readonly remoteTimeoutMs: number;
+	private readonly metaCache = new Map<string, GerritChangeState>(); // key = <repo>|<metaRef>|<hash>
 
-	constructor(git: GitRunner) {
+	constructor(git: GitRunner, remoteTimeoutMs: number = DEFAULT_REMOTE_TIMEOUT_MS) {
 		this.git = git;
+		this.remoteTimeoutMs = remoteTimeoutMs;
+	}
+
+	/**
+	 * Race a remote Git operation against a timeout, so that a stalled SSH/HTTP connection to the
+	 * Gerrit remote cannot block the Git Graph View in a loading state indefinitely.
+	 * Note: the underlying Git child process isn't killed, it is left to exit on its own.
+	 * @param promise The promise of the remote operation.
+	 * @param fallback The value to resolve with if the operation times out or fails.
+	 * @returns The promise of the operation, or the fallback after the timeout.
+	 */
+	private withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+		if (this.remoteTimeoutMs <= 0) return promise;
+		return new Promise<T>((resolve) => {
+			const timer = setTimeout(() => resolve(fallback), this.remoteTimeoutMs);
+			promise.then((value) => {
+				clearTimeout(timer);
+				resolve(value);
+			}, () => {
+				clearTimeout(timer);
+				resolve(fallback);
+			});
+		});
+	}
+
+	/**
+	 * Get a cached NoteDb meta state, refreshing the recency of the entry (the Map preserves
+	 * insertion order, so recently used entries are evicted last).
+	 */
+	private getCachedMeta(cacheKey: string) {
+		const cached = this.metaCache.get(cacheKey);
+		if (cached !== undefined) {
+			this.metaCache.delete(cacheKey);
+			this.metaCache.set(cacheKey, cached);
+		}
+		return cached;
+	}
+
+	/**
+	 * Cache a NoteDb meta state, evicting the least recently used entries when the cache is full.
+	 */
+	private setCachedMeta(cacheKey: string, state: GerritChangeState) {
+		if (this.metaCache.size >= META_CACHE_LIMIT) {
+			let toEvict = this.metaCache.size - META_CACHE_LIMIT + 1;
+			for (const key of this.metaCache.keys()) {
+				if (toEvict <= 0) break;
+				this.metaCache.delete(key);
+				toEvict--;
+			}
+		}
+		this.metaCache.set(cacheKey, state);
 	}
 
 	/**
 	 * List the open change refs on a remote (without fetching any objects).
 	 */
 	public listRemoteChanges(repo: string, remote: string) {
-		return this.git.gitOutput(['ls-remote', remote, 'refs/changes/*'], repo, (stdout) => parseLsRemoteChanges(stdout)).catch(() => new Map<number, number[]>());
+		return this.withTimeout(
+			this.git.gitOutput(['ls-remote', remote, 'refs/changes/*'], repo, (stdout) => parseLsRemoteChanges(stdout)),
+			new Map<number, number[]>()
+		);
 	}
 
 	/**
@@ -413,7 +476,10 @@ export class GerritDataSource {
 	 */
 	public fetchChanges(repo: string, remote: string, refspecs: string[]) {
 		if (refspecs.length === 0) return Promise.resolve(null);
-		return this.git.runGitCommand(['fetch', '--no-tags', remote].concat(refspecs), repo);
+		return this.withTimeout(
+			this.git.runGitCommand(['fetch', '--no-tags', remote].concat(refspecs), repo),
+			<ErrorInfo>'Fetching the Gerrit changes from the remote timed out.'
+		);
 	}
 
 	/**
@@ -426,31 +492,46 @@ export class GerritDataSource {
 	}
 
 	/**
-	 * Delete local change refs of changes that aren't in the keep list (keeps the repository at a constant size).
+	 * Resolve the current hash of every local change ref of a repository in a SINGLE Git command
+	 * (used to look up NoteDb meta hashes in bulk, instead of one `rev-parse` process per ref).
 	 */
-	public async pruneLocalChanges(repo: string, remote: string, keepChanges: ReadonlyArray<number>) {
-		const prefixes = keepChanges.map((change) => 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/');
-		const refs = await this.listLocalChangeRefs(repo, remote);
-		for (const ref of refs) {
-			if (!prefixes.some((prefix) => ref.startsWith(prefix))) {
-				await this.git.runGitCommand(['update-ref', '-d', ref], repo);
+	public listLocalChangeRefHashes(repo: string, remote: string) {
+		return this.git.gitOutput(['for-each-ref', 'refs/remotes/' + remote + '/changes/', '--format=%(refname)%00%(objectname)'], repo, (stdout) => {
+			const hashes = new Map<string, string>();
+			for (const line of stdout.split(/\r?\n/)) {
+				const separator = line.indexOf('\0');
+				if (separator === -1) continue;
+				const ref = line.substring(0, separator);
+				if (ref !== '') hashes.set(ref, line.substring(separator + 1));
 			}
-		}
+			return hashes;
+		}).catch(() => new Map<string, string>());
 	}
 
 	/**
-	 * Delete ALL local change refs (under `refs/remotes/<remote>/changes/`) of a repository.
-	 * @returns The number of refs deleted, and the ErrorInfo of the first failed deletion (NULL => all succeeded).
+	 * Delete local change refs of changes that aren't in the keep list (keeps the repository at a
+	 * constant size). All of the stale refs are deleted by a single batched `git update-ref --stdin`
+	 * command (one process instead of one process per ref).
+	 * @returns The ErrorInfo of the pruning (NULL => all refs were pruned successfully).
+	 */
+	public async pruneLocalChanges(repo: string, remote: string, keepChanges: ReadonlyArray<number>): Promise<ErrorInfo> {
+		const prefixes = keepChanges.map((change) => 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/');
+		const refs = await this.listLocalChangeRefs(repo, remote);
+		const staleRefs = refs.filter((ref) => !prefixes.some((prefix) => ref.startsWith(prefix)));
+		if (staleRefs.length === 0) return null;
+		return this.git.runGitCommandWithInput(['update-ref', '--stdin'], repo, staleRefs.map((ref) => 'delete ' + ref).join('\n') + '\n');
+	}
+
+	/**
+	 * Delete ALL local change refs (under `refs/remotes/<remote>/changes/`) of a repository with a
+	 * single batched `git update-ref --stdin` command (the batch is applied atomically by Git).
+	 * @returns The number of refs deleted, and the ErrorInfo of the failure (NULL => all succeeded).
 	 */
 	public async clearLocalChanges(repo: string, remote: string): Promise<{ error: ErrorInfo; cleared: number }> {
 		const refs = await this.listLocalChangeRefs(repo, remote);
-		let error: ErrorInfo = null, cleared = 0;
-		for (const ref of refs) {
-			const deleteError = await this.git.runGitCommand(['update-ref', '-d', ref], repo);
-			if (deleteError === null) cleared++;
-			else if (error === null) error = deleteError;
-		}
-		return { error: error, cleared: cleared };
+		if (refs.length === 0) return { error: null, cleared: 0 };
+		const error = await this.git.runGitCommandWithInput(['update-ref', '--stdin'], repo, refs.map((ref) => 'delete ' + ref).join('\n') + '\n');
+		return { error: error, cleared: error === null ? refs.length : 0 };
 	}
 
 	/**
@@ -462,14 +543,77 @@ export class GerritDataSource {
 	 */
 	public async parseMeta(repo: string, remote: string, change: number, urlBase: string | null) {
 		const metaRef = 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/meta';
-		let hash: string;
-		try {
-			hash = await this.git.gitOutput(['rev-parse', metaRef], repo, (stdout) => stdout.trim());
-		} catch (_) {
-			return null; // meta ref not available locally
+		const hash = await this.git.gitOutput(['rev-parse', metaRef], repo, (stdout) => stdout.trim()).catch(() => null);
+		if (hash === null) return null; // meta ref not available locally
+		return this.parseMetaLog(repo, change, metaRef, hash, urlBase);
+	}
+
+	/**
+	 * Parse the NoteDb meta refs of many changes into their states, concurrently.
+	 *
+	 * A single Git command resolves the hash of every local change ref (so already-parsed metas
+	 * are served from the cache without any further Git command), and the meta histories of the
+	 * remaining changes are each parsed by their own Git command, run by a pool of concurrent
+	 * workers (each parse is an independent read-only Git operation). This avoids the cost of
+	 * running 2 sequential Git processes per change, which dominated the Git Graph View load time
+	 * on large Gerrit repositories.
+	 * @param repo The repository.
+	 * @param remote The remote the changes were fetched from.
+	 * @param changes The change numbers to parse.
+	 * @param urlBase The base URL of the Gerrit instance (or NULL).
+	 * @returns A map of change number to its state (NULL => the meta ref isn't available locally),
+	 *          in the order of the `changes` input.
+	 */
+	public async parseMetas(repo: string, remote: string, changes: ReadonlyArray<number>, urlBase: string | null): Promise<Map<number, GerritChangeState | null>> {
+		const hashes = await this.listLocalChangeRefHashes(repo, remote);
+		const results = new Map<number, GerritChangeState | null>();
+		const pending: { change: number, metaRef: string, hash: string }[] = [];
+
+		for (const change of changes) {
+			const metaRef = 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/meta';
+			const hash = hashes.get(metaRef);
+			if (hash === undefined) {
+				results.set(change, null); // meta ref not available locally
+				continue;
+			}
+			const cached = this.getCachedMeta(repo + '|' + metaRef + '|' + hash);
+			if (cached !== undefined) {
+				results.set(change, cached);
+			} else {
+				pending.push({ change: change, metaRef: metaRef, hash: hash });
+			}
 		}
+
+		let next = 0;
+		const workers: Promise<void>[] = [];
+		const workerCount = Math.min(META_PARSE_CONCURRENCY, pending.length);
+		for (let i = 0; i < workerCount; i++) {
+			workers.push((async () => {
+				while (next < pending.length) {
+					const item = pending[next++];
+					results.set(item.change, await this.parseMetaLog(repo, item.change, item.metaRef, item.hash, urlBase));
+				}
+			})());
+		}
+		await Promise.all(workers);
+
+		// Preserve the input order (the workers complete in a nondeterministic order)
+		const ordered = new Map<number, GerritChangeState | null>();
+		for (const change of changes) ordered.set(change, <GerritChangeState | null>results.get(change));
+		return ordered;
+	}
+
+	/**
+	 * Parse the NoteDb meta history of a change into its state (cached by the meta ref's hash).
+	 * @param repo The repository.
+	 * @param change The change number.
+	 * @param metaRef The full name of the NoteDb meta ref.
+	 * @param hash The current hash of the meta ref (the cache key component).
+	 * @param urlBase The base URL of the Gerrit instance (or NULL).
+	 */
+	private async parseMetaLog(repo: string, change: number, metaRef: string, hash: string, urlBase: string | null) {
 		const cacheKey = repo + '|' + metaRef + '|' + hash;
-		const cached = this.metaCache.get(cacheKey);
+		const cached = this.getCachedMeta(cacheKey);
 		if (cached !== undefined) return cached;
 
 		const state = await this.git.gitOutput(
@@ -488,7 +632,7 @@ export class GerritDataSource {
 
 		if (state === null) return null;
 		state.url = urlBase !== null ? urlBase + change : null;
-		this.metaCache.set(cacheKey, state);
+		this.setCachedMeta(cacheKey, state);
 		return state;
 	}
 

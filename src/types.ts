@@ -1039,6 +1039,7 @@ export interface RequestLoadCommits extends RepoRequest {
 	readonly stashes: ReadonlyArray<GitStash>;
 	readonly gerritStatusFilter: GerritStatusFilter | null; // null => Gerrit integration disabled (use the default filter)
 	readonly gerritForceRefresh?: boolean; // true => bypass the Gerrit cache and re-fetch the changes from the remote
+	readonly filterPath?: string | null; // only show commits that modified the file(s) at this path (relative to the repository root); null/undefined => no path filter
 }
 export interface ResponseLoadCommits extends ResponseWithErrorInfo {
 	readonly command: 'loadCommits';
@@ -1049,6 +1050,7 @@ export interface ResponseLoadCommits extends ResponseWithErrorInfo {
 	readonly moreCommitsAvailable: boolean;
 	readonly onlyFollowFirstParent: boolean;
 	readonly gerritStates: GerritChangeState[] | null; // null => Gerrit integration disabled
+	readonly gerritPending?: boolean; // true => the Gerrit data is still loading asynchronously: a final loadCommits response with the fresh Gerrit data follows
 }
 
 export interface RequestLoadConfig extends RepoRequest {

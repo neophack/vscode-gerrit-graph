@@ -149,5 +149,9 @@ export function decodeDiffDocUri(uri: vscode.Uri): DiffDocUriData {
 	if (query.includes('%')) {
 		query = decodeURIComponent(query);
 	}
-	return JSON.parse(Buffer.from(query, 'base64').toString());
+	try {
+		return JSON.parse(Buffer.from(query, 'base64').toString());
+	} catch (e) {
+		throw new Error('Unable to decode the Gerrit Graph diff document URI: the data is malformed.');
+	}
 }

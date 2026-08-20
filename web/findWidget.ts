@@ -412,7 +412,7 @@ class FindWidget {
 	private static createMatchElem(text: string) {
 		const span = document.createElement('span');
 		span.className = CLASS_FIND_MATCH;
-		span.innerHTML = text;
+		span.textContent = text;
 		return span;
 	}
 }

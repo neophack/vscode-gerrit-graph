@@ -10,8 +10,8 @@ For any issues or advice, you can find the pull requests page [here](https://git
 ## Resources
 
 *   [Issues](https://github.com/neophack/vscode-gerrit-graph/issues)
-*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Gxl.gerrit-graph)
-*   [Open VSX Registry](https://open-vsx.org/extension/Gxl/gerrit-graph) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
+*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=neophack.gerrit-graph)
+*   [Open VSX Registry](https://open-vsx.org/extension/neophack/gerrit-graph) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
 
 This version aims to address some of the long-standing issues and to keep up with the latest VSCode updates.
 

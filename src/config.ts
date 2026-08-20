@@ -137,7 +137,7 @@ class Config {
 			fetchLimit: this.config.get<number>('gerrit.fetchLimit', 20),
 			patchsets: patchsets === 'all' ? 'all' : 'latest',
 			autoFetch: !!this.config.get('gerrit.autoFetch', false),
-			showChangeRefs: !!this.config.get('gerrit.showChangeRefs', true),
+			showChangeRefs: !!this.config.get('gerrit.showChangeRefs', false),
 			includeChangeCommits: !!this.config.get('gerrit.includeChangeCommits', true),
 			showReviewProgress: !!this.config.get('gerrit.showReviewProgress', true),
 			showMetaCommits: showMetaCommits === 'expanded' ? 'expanded' : (showMetaCommits === 'off' ? 'off' : 'collapsed'),
@@ -629,6 +629,15 @@ class Config {
 		} else {
 			return [];
 		}
+	}
+
+	/**
+	 * Get the optional GitLab Personal Access Token configured by the
+	 * `gerrit-graph.avatars.gitlabToken` Extension Setting, used to raise the rate limit of the
+	 * GitLab API when fetching avatars.
+	 */
+	get gitlabToken() {
+		return this.config.get<string>('avatars.gitlabToken', '');
 	}
 
 	/**

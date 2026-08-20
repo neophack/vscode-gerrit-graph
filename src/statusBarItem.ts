@@ -25,7 +25,7 @@ export class StatusBarItem extends Disposable {
 
 		const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1);
 		statusBarItem.text = 'Gerrit Graph';
-		statusBarItem.tooltip = 'View Git Graph';
+		statusBarItem.tooltip = 'View Gerrit Graph';
 		statusBarItem.command = 'gerrit-graph.view';
 		this.statusBarItem = statusBarItem;
 

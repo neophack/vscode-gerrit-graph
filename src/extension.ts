@@ -17,7 +17,7 @@ import { EventEmitter } from './utils/event';
  */
 export async function activate(context: vscode.ExtensionContext) {
 	const logger = new Logger();
-	logger.log('Starting Git Graph ...');
+	logger.log('Starting Gerrit Graph ...');
 
 	const gitExecutableEmitter = new EventEmitter<GitExecutable>();
 	const onDidChangeGitExecutable = gitExecutableEmitter.subscribe;
@@ -56,7 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 				getGitExecutableFromPaths(paths).then((gitExecutable) => {
 					gitExecutableEmitter.emit(gitExecutable);
-					const msg = 'Git Graph is now using ' + gitExecutable.path + ' (version: ' + gitExecutable.version + ')';
+					const msg = 'Gerrit Graph is now using ' + gitExecutable.path + ' (version: ' + gitExecutable.version + ')';
 					showInformationMessage(msg);
 					logger.log(msg);
 					repoManager.searchWorkspaceForRepos();
@@ -78,7 +78,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		gitExecutableEmitter,
 		logger
 	);
-	logger.log('Started Git Graph - Ready to use!');
+	logger.log('Started Gerrit Graph - Ready to use!');
 
 	extensionState.expireOldCodeReviews();
 }

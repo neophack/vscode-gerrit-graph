@@ -37,8 +37,17 @@ function rmRecursive(target: string) {
 	if (!fs.existsSync(target)) return;
 	for (const entry of fs.readdirSync(target)) {
 		const entryPath = path.join(target, entry);
-		if (fs.statSync(entryPath).isDirectory()) rmRecursive(entryPath);
-		else fs.unlinkSync(entryPath);
+		if (fs.statSync(entryPath).isDirectory()) {
+			rmRecursive(entryPath);
+		} else {
+			// Git marks its object files read-only: clear the flag before deleting (Windows)
+			try {
+				fs.unlinkSync(entryPath);
+			} catch (_) {
+				fs.chmodSync(entryPath, 0o666);
+				fs.unlinkSync(entryPath);
+			}
+		}
 	}
 	fs.rmdirSync(target);
 }
@@ -207,8 +216,8 @@ describe('Gerrit integration (real Git repositories)', () => {
 	});
 
 	/** Commit loading with the standard "Show All Branches" options used by the view. */
-	const loadCommits = (repo: string, gerritRefs: string[] | null, maxCommits = 100, branches: string[] | null = null) =>
-		dataSource.getCommits(repo, branches, null, maxCommits, false, true, false, false, CommitOrdering.Date, ['origin'], [], [], gerritRefs);
+	const loadCommits = (repo: string, gerritRefs: string[] | null, maxCommits = 100, branches: string[] | null = null, gerritShowChangeRefs = false) =>
+		dataSource.getCommits(repo, branches, null, maxCommits, false, true, false, false, CommitOrdering.Date, ['origin'], [], [], gerritRefs, gerritShowChangeRefs);
 
 	const hashesOf = (data: { commits: { hash: string }[] }) => data.commits.map((commit) => commit.hash);
 
@@ -498,6 +507,32 @@ describe('Gerrit integration (real Git repositories)', () => {
 		it('does not list Gerrit change refs as remote branch references', async () => {
 			const refData = await (<any>dataSource).getRefs(sandbox.work, true, false, []);
 			expect(refData.remotes.map((ref: { name: string }) => ref.name).sort()).toEqual(['origin/develop']);
+		});
+
+		it('lists the Gerrit change refs as remote branch references when "Show Refs" is enabled', async () => {
+			const refData = await (<any>dataSource).getRefs(sandbox.work, true, false, [], true);
+			expect(refData.remotes.map((ref: { name: string }) => ref.name).sort()).toEqual([
+				'origin/changes/00/100/1',
+				'origin/changes/01/101/1',
+				'origin/changes/02/102/1',
+				'origin/changes/03/103/1',
+				'origin/changes/03/103/2',
+				'origin/changes/04/104/1',
+				'origin/changes/05/105/1',
+				'origin/develop'
+			]);
+		});
+
+		it('annotates the change commits with their Gerrit change refs when "Show Refs" is enabled', async () => {
+			const refs = viewRefs(states, patchsetsByChange, { new: true, merged: false, abandoned: false, wip: false }, 'latest', 'origin');
+			const data = await loadCommits(sandbox.work, refs, 100, null, true);
+			const remotesByHash: { [hash: string]: string[] } = {};
+			for (const commit of data.commits) remotesByHash[commit.hash] = commit.remotes.map((remote) => remote.name);
+			expect(remotesByHash[O1]).toEqual(['origin/changes/02/102/1']);
+			expect(remotesByHash[P2]).toEqual(['origin/changes/03/103/2']);
+			expect(remotesByHash[P1]).toEqual(['origin/changes/03/103/1']); // patchset 1 was downloaded by the earlier 'all' patchsets fetch
+			expect(remotesByHash[M1]).toEqual(['origin/changes/00/100/1']); // a merged change's ref points at a commit already on develop
+			expect(remotesByHash[D1prime]).toEqual(['origin/HEAD', 'origin/develop']); // the develop tip carries the remote HEAD + branch refs
 		});
 
 		/* 5. Pruning: keep the local change refs of the kept changes only */

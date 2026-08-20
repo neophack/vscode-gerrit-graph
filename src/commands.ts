@@ -27,7 +27,7 @@ export class CommandManager extends Disposable {
 	/**
 	 * Creates the Git Graph Command Manager.
 	 * @param extensionPath The absolute file path of the directory containing the extension.
-	 * @param avatarManger The Git Graph AvatarManager instance.
+	 * @param avatarManager The Git Graph AvatarManager instance.
 	 * @param dataSource The Git Graph DataSource instance.
 	 * @param extensionState The Git Graph ExtensionState instance.
 	 * @param repoManager The Git Graph RepoManager instance.
@@ -35,10 +35,10 @@ export class CommandManager extends Disposable {
 	 * @param onDidChangeGitExecutable The Event emitting the Git executable for Git Graph to use.
 	 * @param logger The Git Graph Logger instance.
 	 */
-	constructor(context: vscode.ExtensionContext, avatarManger: AvatarManager, dataSource: DataSource, extensionState: ExtensionState, repoManager: RepoManager, gitExecutable: GitExecutable | null, onDidChangeGitExecutable: GgEvent<GitExecutable | null>, logger: Logger) {
+	constructor(context: vscode.ExtensionContext, avatarManager: AvatarManager, dataSource: DataSource, extensionState: ExtensionState, repoManager: RepoManager, gitExecutable: GitExecutable | null, onDidChangeGitExecutable: GgEvent<GitExecutable | null>, logger: Logger) {
 		super();
 		this.context = context;
-		this.avatarManager = avatarManger;
+		this.avatarManager = avatarManager;
 		this.dataSource = dataSource;
 		this.extensionState = extensionState;
 		this.logger = logger;
@@ -81,7 +81,17 @@ export class CommandManager extends Disposable {
 		this.registerDisposable(
 			vscode.commands.registerCommand(command, (...args: any[]) => {
 				this.logger.log('Command Invoked: ' + command);
-				callback(...args);
+				try {
+					const result = callback(...args);
+					// Prevent unhandled promise rejections if the command handler is asynchronous
+					if (result !== undefined && result !== null && typeof (<Promise<void>>result).catch === 'function') {
+						(<Promise<void>>result).catch((error) => {
+							this.logger.logError('Command "' + command + '" failed: ' + error);
+						});
+					}
+				} catch (error) {
+					this.logger.logError('Command "' + command + '" failed: ' + error);
+				}
 			})
 		);
 	}
@@ -167,7 +177,7 @@ export class CommandManager extends Disposable {
 		}));
 
 		vscode.window.showQuickPick(items, {
-			placeHolder: 'Select a repository to remove from Git Graph:',
+			placeHolder: 'Select a repository to remove from Gerrit Graph:',
 			canPickMany: false
 		}).then((item) => {
 			if (item && item.description !== undefined) {
@@ -348,7 +358,7 @@ export class CommandManager extends Disposable {
 				commitHash: c.hash
 			}));
 			const selected = await vscode.window.showQuickPick(items, {
-				placeHolder: 'Select a commit to view in Git Graph',
+				placeHolder: 'Select a commit to view in Gerrit Graph',
 				matchOnDescription: true,
 				matchOnDetail: true
 			});
@@ -363,7 +373,7 @@ export class CommandManager extends Disposable {
 	private async version() {
 		try {
 			const gitGraphVersion = await getExtensionVersion(this.context);
-			const information = 'Git Graph: ' + gitGraphVersion + '\nVisual Studio Code: ' + vscode.version + '\nOS: ' + os.type() + ' ' + os.arch() + ' ' + os.release() + '\nGit: ' + (this.gitExecutable !== null ? this.gitExecutable.version : '(none)');
+			const information = 'Gerrit Graph: ' + gitGraphVersion + '\nVisual Studio Code: ' + vscode.version + '\nOS: ' + os.type() + ' ' + os.arch() + ' ' + os.release() + '\nGit: ' + (this.gitExecutable !== null ? this.gitExecutable.version : '(none)');
 			vscode.window.showInformationMessage(information, { modal: true }, 'Copy').then((selectedItem) => {
 				if (selectedItem === 'Copy') {
 					copyToClipboard(information).then((result) => {

@@ -66,7 +66,6 @@ const VIEW_HTML = '<div id="view" tabindex="-1">' +
 	'<label id="showRemoteBranchesControl"><input type="checkbox" id="showRemoteBranchesCheckbox"></label>' +
 	'<div id="currentBtn"></div><div id="findBtn"></div><div id="terminalBtn"></div><div id="settingsBtn"></div><div id="fetchBtn"></div><div id="refreshBtn"></div></div>' +
 	'<div id="gerritControls"><span class="gerritRowLabel">Gerrit:</span>' +
-	'<label id="gerritShowRefsControl"><input type="checkbox" id="gerritShowRefsCheckbox"></label>' +
 		'<span id="gerritFilterControl"></span><div id="gerritAmendBtn"></div><div id="gerritSubmitBtn"></div><div id="gerritClearRefsBtn"></div></div>' +
 	'<div id="content"><div id="commitGraph"></div><div id="commitTable"></div></div>' +
 	'<div id="footer"></div></div>';
@@ -135,7 +134,7 @@ describe('Webview Gerrit chip simulation', () => {
 		const loadMsg2 = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(loadMsg2.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
 
-		// 5. Extension responds with the merged change state + its commit
+		// 5. Extension responds with the merged change state + its commit (carrying the Gerrit change ref, since Show Refs is on)
 		window.dispatchEvent(new MessageEvent('message', { data: {
 			command: 'loadCommits', refreshId: loadMsg2.refreshId, error: null, head: 'develop', tags: [],
 			moreAvailable: false, onlyFollowFirstParent: false,
@@ -143,7 +142,7 @@ describe('Webview Gerrit chip simulation', () => {
 				change: 41456, patchset: 1, codeReview: 2, verified: 1, status: 'merged', wip: false,
 				headHash: COMMIT_MERGED.hash, events: [{ type: 'merged', patchset: 1, timestamp: 1755000000, raw: 'Change has been successfully merged' }], url: null
 			}],
-			commits: [COMMIT_MERGED, COMMIT_PLAIN]
+			commits: [{ ...COMMIT_MERGED, remotes: [{ name: 'origin/changes/56/41456/1', remote: 'origin' }] }, COMMIT_PLAIN]
 		} }));
 
 		// 6. The table must re-render: the change commit appears with a Gerrit badge and meta chip
@@ -152,19 +151,10 @@ describe('Webview Gerrit chip simulation', () => {
 		expect(badge).not.toBeNull();
 		expect(badge.textContent).toContain('#41456/1');
 		expect(badge.textContent).toContain('CR+2');
+		const changeRefChip = document.querySelector('.gitRef.remote[data-name="origin/changes/56/41456/1"]');
+		expect(changeRefChip).not.toBeNull();
 
-		// 7. Toggling Show Refs off removes the badge locally (no new request)
-		const before = sentMessages.length;
-		const showRefs = document.getElementById('gerritShowRefsCheckbox');
-		showRefs.checked = false;
-		showRefs.dispatchEvent(new Event('change'));
-		expect(document.querySelector('.gitRef.gerrit')).toBeNull();
-		expect(sentMessages.length).toBe(before);
-
-		// 8. Clicking the meta chip expands in-table meta rows (no request)
-		showRefs.checked = true;
-		showRefs.dispatchEvent(new Event('change'));
-		expect(document.querySelector('.gitRef.gerrit')).not.toBeNull();
+		// 7. Clicking the meta chip expands in-table meta rows (no request)
 		expect(document.querySelector('.gg-meta-chip')).not.toBeNull();
 		(document.querySelector('.gg-meta-chip') as any).click();
 		expect(document.querySelectorAll('tr.gg-meta-row').length).toBe(1);

@@ -388,7 +388,7 @@ describe('CommandManager', () => {
 						}
 					],
 					{
-						placeHolder: 'Select a repository to remove from Git Graph:',
+						placeHolder: 'Select a repository to remove from Gerrit Graph:',
 						canPickMany: false
 					}
 				);
@@ -427,7 +427,7 @@ describe('CommandManager', () => {
 						}
 					],
 					{
-						placeHolder: 'Select a repository to remove from Git Graph:',
+						placeHolder: 'Select a repository to remove from Gerrit Graph:',
 						canPickMany: false
 					}
 				);
@@ -461,7 +461,7 @@ describe('CommandManager', () => {
 						}
 					],
 					{
-						placeHolder: 'Select a repository to remove from Git Graph:',
+						placeHolder: 'Select a repository to remove from Gerrit Graph:',
 						canPickMany: false
 					}
 				);
@@ -495,7 +495,7 @@ describe('CommandManager', () => {
 						}
 					],
 					{
-						placeHolder: 'Select a repository to remove from Git Graph:',
+						placeHolder: 'Select a repository to remove from Gerrit Graph:',
 						canPickMany: false
 					}
 				);
@@ -1209,8 +1209,8 @@ describe('CommandManager', () => {
 			// Assert
 			await waitForExpect(() => {
 				expect(spyOnLog).toHaveBeenCalledWith('Command Invoked: gerrit-graph.version');
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
-				expect(spyOnCopyToClipboard).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0');
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
+				expect(spyOnCopyToClipboard).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0');
 			});
 		});
 
@@ -1229,7 +1229,7 @@ describe('CommandManager', () => {
 			// Assert
 			await waitForExpect(() => {
 				expect(spyOnLog).toHaveBeenCalledWith('Command Invoked: gerrit-graph.version');
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: (none)', { modal: true }, 'Copy');
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: (none)', { modal: true }, 'Copy');
 				expect(spyOnCopyToClipboard).not.toHaveBeenCalled();
 			});
 		});
@@ -1265,8 +1265,8 @@ describe('CommandManager', () => {
 			// Assert
 			await waitForExpect(() => {
 				expect(spyOnLog).toHaveBeenCalledWith('Command Invoked: gerrit-graph.version');
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
-				expect(spyOnCopyToClipboard).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0');
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
+				expect(spyOnCopyToClipboard).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0');
 				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('error message');
 			});
 		});
@@ -1285,7 +1285,7 @@ describe('CommandManager', () => {
 			// Assert
 			await waitForExpect(() => {
 				expect(spyOnLog).toHaveBeenCalledWith('Command Invoked: gerrit-graph.version');
-				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Git Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
+				expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Gerrit Graph: 1.27.0\nVisual Studio Code: 1.51.0\nOS: X Y Z\nGit: 2.25.0', { modal: true }, 'Copy');
 				expect(spyOnCopyToClipboard).not.toHaveBeenCalled();
 			});
 		});

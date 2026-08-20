@@ -1,13 +1,13 @@
 {
 	"name": "gerrit-graph",
 	"displayName": "Gerrit Graph",
-	"version": "1.37.32",
-	"publisher": "Gxl",
+	"version": "1.38.0",
+	"publisher": "neophack",
 	"engine": {
 		"node": "18.17.1"
 	},
 	"author": {
-		"name": "Gxl"
+		"name": "neophack"
 	},
 	"description": "Show Git Branch & Tag Graph",
 	"keywords": [
@@ -508,6 +508,11 @@
 					},
 					"default": [],
 					"markdownDescription": "An array of custom Pull Request providers that can be used in the \"Pull Request Creation\" Integration. For information on how to configure this setting, see the documentation [here](https://github.com/git-hub-tig/vscode-git-graph/wiki/Configuring-a-custom-Pull-Request-Provider)."
+				},
+				"gerrit-graph.avatars.gitlabToken": {
+					"type": "string",
+					"default": "",
+					"description": "An optional GitLab Personal Access Token (read-only scope is sufficient), used to raise the rate limit of the GitLab API when fetching avatars from gitlab.com. No credentials are sent when this setting is empty."
 				},
 				"gerrit-graph.date.format": {
 					"type": "string",
@@ -1243,11 +1248,11 @@
 					"default": false,
 					"description": "Periodically fetch Gerrit changes automatically."
 				},
-				"gerrit-graph.gerrit.showChangeRefs": {
-					"type": "boolean",
-					"default": true,
-					"description": "Show Gerrit change badges on commits."
-				},
+					"gerrit-graph.gerrit.showChangeRefs": {
+						"type": "boolean",
+						"default": false,
+						"description": "Show Gerrit change badges on commits."
+					},
 				"gerrit-graph.gerrit.includeChangeCommits": {
 					"type": "boolean",
 					"default": true,

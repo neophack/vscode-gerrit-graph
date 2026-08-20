@@ -67,8 +67,8 @@ declare global {
 		readonly findWidget: FindWidgetState;
 		readonly settingsWidget: SettingsWidgetState;
 		readonly gerritStatusFilter?: GG.GerritStatusFilter | null;
-		readonly gerritShowRefs?: boolean | null;
 		readonly gerritStates?: { [hash: string]: GG.GerritChangeState };
+		readonly commitPathFilter?: string | null; // only show commits that modified the file(s) at this path
 	}
 
 

@@ -8,7 +8,7 @@ import { getConfig } from './config';
 import { GerritDataSource } from './gerrit';
 import { Logger } from './logger';
 import { ActionedUser, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
-import { GitExecutable, GitVersionRequirement, UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, constructIncompatibleGitVersionMessage, doesVersionMeetRequirement, getPathFromStr, getPathFromUri, openGitTerminal, pathWithTrailingSlash, realpath, resolveSpawnOutput, showErrorMessage } from './utils';
+import { GitExecutable, GitVersionRequirement, UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, constructIncompatibleGitVersionMessage, doesVersionMeetRequirement, getPathFromStr, getPathFromUri, isSafeRefName, isSafeStashSelector, isValidCommitHash, openGitTerminal, pathWithTrailingSlash, quoteShellArg, realpath, resolveSpawnOutput, showErrorMessage } from './utils';
 import { Disposable } from './utils/disposable';
 import { GgEvent } from './utils/event';
 
@@ -47,6 +47,32 @@ export class DataSource extends Disposable {
 	private gitFormatCommitDetails!: string;
 	private gitFormatLog!: string;
 	private gitFormatStash!: string;
+
+	/**
+	 * Check that values received from an untrusted source (the webview) are safe to be passed to
+	 * git, i.e. they cannot be misinterpreted as git options (argument injection).
+	 * @param checks Tuples of [argument name, value, kind] to validate. Values that are null or
+	 * undefined are skipped.
+	 * @returns An error message if any value is unsafe, otherwise null.
+	 */
+	private static checkUnsafeGitArgs(...checks: [string, string | null | undefined, 'hash' | 'ref' | 'stash'][]): ErrorInfo {
+		for (const [name, value, kind] of checks) {
+			if (value === null || value === undefined) continue;
+			let valid: boolean;
+			if (kind === 'hash') {
+				valid = isValidCommitHash(value);
+			} else if (kind === 'stash') {
+				valid = isSafeStashSelector(value);
+			} else {
+				valid = isSafeRefName(value);
+			}
+			if (!valid) {
+				const label = kind === 'hash' ? 'commit hash' : (kind === 'stash' ? 'stash selector' : 'reference name');
+				return 'Invalid ' + label + ' was provided for "' + name + '"';
+			}
+		}
+		return null;
+	}
 
 	/**
 	 * Creates the Git Graph Data Source.
@@ -150,13 +176,15 @@ export class DataSource extends Disposable {
 	}
 
 	public searchHistory(repo: string, query: string): Promise<{hash: string, author: string, date: number, message: string}[]> {
-		const args = ['log', '--all', '-E', '-i', '--grep=' + query, '--format=%H|%an|%at|%s', '--max-count=100'];
+		// The unit separator (\x1f) is used instead of `|` so that hashes, author names and
+		// subjects containing `|` don't shift the fields
+		const args = ['log', '--all', '-E', '-i', '--grep=' + query, '--format=%H%x1f%an%x1f%at%x1f%s', '--max-count=100'];
 		return this.spawnGit(args, repo, (stdoutBuf) => {
 			const text = stdoutBuf.toString().replace(/\n$/, '');
 			if (!text) return [];
 			const lines = text.split('\n');
 			return lines.map(line => {
-				const parts = line.split('|');
+				const parts = line.split('\x1f');
 				return {
 					hash: parts[0],
 					author: parts[1],
@@ -174,7 +202,6 @@ export class DataSource extends Disposable {
 			showStashes ? this.getStashes(repo) : Promise.resolve([]),
 			this.getTags(repo)
 		]).then((results) => {
-			/* eslint no-console: "error" */
 			return { branches: results[0].branches, head: results[0].head, remotes: results[1], stashes: results[2], tags: results[3], error: null };
 		}).catch((errorMessage) => {
 			return { branches: [], head: null, remotes: [], stashes: [], tags: [], error: errorMessage };
@@ -193,15 +220,23 @@ export class DataSource extends Disposable {
 	 * @param remotes An array of known remotes.
 	 * @param hideRemotes An array of hidden remotes.
 	 * @param stashes An array of all stashes in the repository.
+	 * @param gerritRefs The list of Gerrit change refs allowed into the graph (NULL => Gerrit integration disabled).
+	 * @param gerritShowChangeRefs Should the Gerrit change refs (refs/remotes/<remote>/changes/*) be displayed as remote branch refs.
+	 * @param filterPath Only show commits that modified the file(s) at this path (relative to the repository root), or NULL (no path filter).
 	 * @returns The commits in the repository.
 	 */
-	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null): Promise<GitCommitData> {
+	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null, gerritShowChangeRefs: boolean = false, filterPath: string | null = null): Promise<GitCommitData> {
 		const config = getConfig();
-		const refs = branches;
-		return Promise.all([
-			this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes, gerritRefs),
-			this.getRefs(repo, showRemoteBranches, config.showRemoteHeads, hideRemotes).then((refData: GitRefData) => refData, (errorMessage: string) => errorMessage)
-		]).then(async (results) => {
+		// Branch names are received from the webview and passed to git log as bare arguments, so
+		// drop any that could be misinterpreted as git options (argument injection)
+		const refs = branches === null ? null : branches.filter((branch) => isSafeRefName(branch) || isValidCommitHash(branch));
+		// The commit log, refs and uncommitted changes status are all started before any of them
+		// is awaited, so that the three Git processes run in parallel
+		const logPromise = this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes, gerritRefs, filterPath);
+		const refsPromise = this.getRefs(repo, showRemoteBranches, config.showRemoteHeads, hideRemotes, gerritShowChangeRefs).then((refData: GitRefData) => refData, (errorMessage: string) => errorMessage);
+		const uncommittedChangesPromise = config.showUncommittedChanges ? this.getUncommittedChanges(repo) : null;
+		if (uncommittedChangesPromise !== null) uncommittedChangesPromise.catch(() => { /* the failure is re-thrown when the value is used below */ });
+		return Promise.all([logPromise, refsPromise]).then(async (results) => {
 			let commits: GitCommitRecord[] = results[0], refData: GitRefData | string = results[1], i;
 			let moreCommitsAvailable = commits.length === maxCommits + 1;
 			if (moreCommitsAvailable) commits.pop();
@@ -218,10 +253,10 @@ export class DataSource extends Disposable {
 				}
 			}
 
-			if (refData.head !== null && config.showUncommittedChanges) {
+			if (refData.head !== null && uncommittedChangesPromise !== null) {
 				for (i = 0; i < commits.length; i++) {
 					if (refData.head === commits[i].hash) {
-						const numUncommittedChanges = await this.getUncommittedChanges(repo);
+						const numUncommittedChanges = await uncommittedChangesPromise;
 						if (numUncommittedChanges > 0) {
 							commits.unshift({ hash: UNCOMMITTED, parents: [refData.head], author: '*', email: '', date: Math.round((new Date()).getTime() / 1000), message: 'Uncommitted Changes (' + numUncommittedChanges + ')' });
 						}
@@ -408,13 +443,13 @@ export class DataSource extends Disposable {
 				const message = errorMessage.toLowerCase();
 				if (message.startsWith('fatal: unable to read config file') && message.endsWith('no such file or directory')) {
 					// If the Git command failed due to the configuration file not existing, return an empty list instead of throwing the exception
-					return {};
+					return [];
 				}
 			} else {
 				errorMessage = 'An unexpected error occurred while spawning the Git child process.';
 			}
 			throw errorMessage;
-		}) as Promise<ActionedUser[]>;
+		});
 		return result;
 	}
 	/* Get Data Methods - Commit Details View */
@@ -701,6 +736,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async addRemote(repo: string, name: string, url: string, pushUrl: string | null, fetch: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['name', name, 'ref']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		let status = await this.runGitCommand(['remote', 'add', name, url], repo);
 		if (status !== null) return status;
 
@@ -719,6 +757,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public deleteRemote(repo: string, name: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['name', name, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['remote', 'remove', name], repo);
 	}
 
@@ -734,6 +775,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async editRemote(repo: string, nameOld: string, nameNew: string, urlOld: string | null, urlNew: string | null, pushUrlOld: string | null, pushUrlNew: string | null) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['nameOld', nameOld, 'ref'], ['nameNew', nameNew, 'ref']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		if (nameOld !== nameNew) {
 			let status = await this.runGitCommand(['remote', 'rename', nameOld, nameNew], repo);
 			if (status !== null) return status;
@@ -769,6 +813,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public pruneRemote(repo: string, name: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['name', name, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['remote', 'prune', name], repo);
 	}
 
@@ -786,6 +833,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public addTag(repo: string, tagName: string, commitHash: string, type: TagType, message: string, force: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['tagName', tagName, 'ref'], ['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['tag'];
 		if (force) {
 			args.push('-f');
@@ -807,6 +857,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async deleteTag(repo: string, tagName: string, deleteOnRemote: string | null) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['tagName', tagName, 'ref'], ['deleteOnRemote', deleteOnRemote, 'ref']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		if (deleteOnRemote !== null) {
 			let status = await this.runGitCommand(['push', deleteOnRemote, '--delete', tagName], repo);
 			if (status !== null && !status.includes('remote ref does not exist')) return status;
@@ -837,6 +890,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public fetch(repo: string, remote: string | null, prune: boolean, pruneTags: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['remote', remote, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		let args = ['fetch', remote === null ? '--all' : remote];
 
 		if (prune) {
@@ -864,6 +920,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public pushBranch(repo: string, branchName: string, remote: string, setUpstream: boolean, mode: GitPushBranchMode) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref'], ['remote', remote, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		let args = ['push'];
 		args.push(remote, branchName);
 		if (setUpstream) args.push('--set-upstream');
@@ -905,8 +964,16 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo's from the executed commands.
 	 */
 	public async pushTag(repo: string, tagName: string, remotes: string[], commitHash: string, skipRemoteCheck: boolean): Promise<ErrorInfo[]> {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['tagName', tagName, 'ref'], ['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return [unsafeArgs];
+
 		if (remotes.length === 0) {
 			return ['No remote(s) were specified to push the tag ' + tagName + ' to.'];
+		}
+
+		const unsafeRemotes = remotes.filter((remote) => !isSafeRefName(remote));
+		if (unsafeRemotes.length > 0) {
+			return ['Invalid reference name was provided for "remotes"'];
 		}
 
 		if (!skipRemoteCheck) {
@@ -937,6 +1004,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public checkoutBranch(repo: string, branchName: string, remoteBranch: string | null) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref'], ['remoteBranch', remoteBranch, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		let args = ['checkout'];
 		if (remoteBranch === null) args.push(branchName);
 		else args.push('-b', branchName, remoteBranch);
@@ -954,6 +1024,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo's from the executed command(s).
 	 */
 	public async createBranch(repo: string, branchName: string, commitHash: string, checkout: boolean, force: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref'], ['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return [unsafeArgs];
+
 		const args = [];
 		if (checkout && !force) {
 			args.push('checkout', '-b');
@@ -980,6 +1053,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public deleteBranch(repo: string, branchName: string, force: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['branch', force ? '-D' : '-d', branchName], repo);
 	}
 
@@ -991,6 +1067,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async deleteRemoteBranch(repo: string, branchName: string, remote: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref'], ['remote', remote, 'ref']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		let remoteStatus = await this.runGitCommand(['push', remote, '--delete', branchName], repo);
 		if (remoteStatus !== null && (new RegExp('remote ref does not exist', 'i')).test(remoteStatus)) {
 			let trackingBranchStatus = await this.runGitCommand(['branch', '-d', '-r', remote + '/' + branchName], repo);
@@ -1009,6 +1088,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async fetchIntoLocalBranch(repo: string, remote: string, remoteBranch: string, localBranch: string, force: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['remote', remote, 'ref'], ['remoteBranch', remoteBranch, 'ref'], ['localBranch', localBranch, 'ref']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		const currentBranch = await this.spawnGit(['symbolic-ref', '--short', 'HEAD'], repo, (stdout) => stdout.trim());
 
 		if (currentBranch === localBranch) {
@@ -1043,6 +1125,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public pullBranch(repo: string, branchName: string, remote: string, createNewCommit: boolean, squash: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['branchName', branchName, 'ref'], ['remote', remote, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['pull', remote, branchName], config = getConfig();
 		if (squash) {
 			args.push('--squash');
@@ -1067,6 +1152,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public renameBranch(repo: string, oldName: string, newName: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['oldName', oldName, 'ref'], ['newName', newName, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['branch', '-m', oldName, newName], repo);
 	}
 
@@ -1084,6 +1172,11 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public merge(repo: string, obj: string, actionOn: MergeActionOn, createNewCommit: boolean, squash: boolean, noCommit: boolean) {
+		const unsafeArgs = actionOn === MergeActionOn.Commit
+			? DataSource.checkUnsafeGitArgs(['obj', obj, 'hash'])
+			: DataSource.checkUnsafeGitArgs(['obj', obj, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['merge', obj], config = getConfig();
 		if (squash) {
 			args.push('--squash');
@@ -1113,10 +1206,17 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public rebase(repo: string, obj: string, actionOn: RebaseActionOn, ignoreDate: boolean, interactive: boolean) {
+		const unsafeArgs = actionOn === RebaseActionOn.Branch
+			? DataSource.checkUnsafeGitArgs(['obj', obj, 'ref'])
+			: DataSource.checkUnsafeGitArgs(['obj', obj, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		if (interactive) {
+			// The object is safely quoted so that it cannot escape the argument in the shell
+			// command that is sent to the integrated terminal.
 			return this.openGitTerminal(
 				repo,
-				'rebase --interactive ' + (getConfig().signCommits ? '-S ' : '') + (actionOn === RebaseActionOn.Branch ? obj.replace(/'/g, '"\'"') : obj),
+				'rebase --interactive ' + (getConfig().signCommits ? '-S ' : '') + (actionOn === RebaseActionOn.Branch ? quoteShellArg(obj) : obj),
 				'Rebase on "' + (actionOn === RebaseActionOn.Branch ? obj : abbrevCommit(obj)) + '"'
 			);
 		} else {
@@ -1143,6 +1243,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public archive(repo: string, ref: string, outputFilePath: string, type: 'tar' | 'zip') {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['ref', ref, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['archive', '--format=' + type, '-o', outputFilePath, ref], repo);
 	}
 
@@ -1156,6 +1259,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public checkoutCommit(repo: string, commitHash: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['checkout', commitHash], repo);
 	}
 
@@ -1169,6 +1275,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public cherrypickCommit(repo: string, commitHash: string, parentIndex: number, recordOrigin: boolean, noCommit: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['cherry-pick'];
 		if (noCommit) {
 			args.push('--no-commit');
@@ -1193,6 +1302,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public dropCommit(repo: string, commitHash: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['rebase'];
 		if (getConfig().signCommits) {
 			args.push('-S');
@@ -1209,6 +1321,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public resetToCommit(repo: string, commit: string, resetMode: GitResetMode) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commit', commit, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['reset', '--' + resetMode, commit], repo);
 	}
 
@@ -1220,6 +1335,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public revertCommit(repo: string, commitHash: string, parentIndex: number) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		const args = ['revert', '--no-edit'];
 		if (getConfig().signCommits) {
 			args.push('-S');
@@ -1248,6 +1366,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async editCommitMessage(repo: string, commitHash: string, message: string): Promise<ErrorInfo> {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return unsafeArgs;
+
 		try {
 			const headCommit = await this.spawnGit(['rev-parse', 'HEAD'], repo, (stdout) => stdout.trim());
 
@@ -1315,6 +1436,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public resetFileToRevision(repo: string, commitHash: string, filePath: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['checkout', commitHash, '--', filePath], repo);
 	}
 
@@ -1329,6 +1453,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public applyStash(repo: string, selector: string, reinstateIndex: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['selector', selector, 'stash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		let args = ['stash', 'apply'];
 		if (reinstateIndex) args.push('--index');
 		args.push(selector);
@@ -1344,6 +1471,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public branchFromStash(repo: string, selector: string, branchName: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['selector', selector, 'stash'], ['branchName', branchName, 'ref']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['stash', 'branch', branchName, selector], repo);
 	}
 
@@ -1354,6 +1484,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public dropStash(repo: string, selector: string) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['selector', selector, 'stash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return this.runGitCommand(['stash', 'drop', selector], repo);
 	}
 
@@ -1365,6 +1498,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public popStash(repo: string, selector: string, reinstateIndex: boolean) {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['selector', selector, 'stash']);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		let args = ['stash', 'pop'];
 		if (reinstateIndex) args.push('--index');
 		args.push(selector);
@@ -1404,6 +1540,14 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public openExternalDirDiff(repo: string, fromHash: string, toHash: string, isGui: boolean) {
+		// The hashes are interpolated into a shell command sent to the integrated terminal when the
+		// external diff tool is not GUI based, so they must be validated to prevent command injection.
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(
+			['fromHash', fromHash === UNCOMMITTED ? null : fromHash, 'hash'],
+			['toHash', toHash === UNCOMMITTED ? null : toHash, 'hash']
+		);
+		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+
 		return new Promise<ErrorInfo>((resolve) => {
 			if (this.gitExecutable === null) {
 				resolve(UNABLE_TO_FIND_GIT_MSG);
@@ -1644,7 +1788,7 @@ export class DataSource extends Disposable {
 	 * @param gerritRefs The list of Gerrit change refs allowed into the graph (NULL => Gerrit integration disabled). Only used when showing all refs.
 	 * @returns An array of commits.
 	 */
-	private getLog(repo: string, refs: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, num: number, includeTags: boolean, includeRemotes: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, order: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null) {
+	private getLog(repo: string, refs: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, num: number, includeTags: boolean, includeRemotes: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, order: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null, filterPath: string | null = null) {
 		const args = ['-c', 'log.showSignature=false', 'log', '--max-count=' + num, '--format=' + this.gitFormatLog, '--' + order + '-order', '-z'];
 		if (onlyFollowFirstParent) {
 			args.push('--first-parent');
@@ -1687,6 +1831,12 @@ export class DataSource extends Disposable {
 			for (const ref of gerritRefs) args.push(ref);
 		}
 		args.push('--');
+		// Only show commits that modified the file(s) at the filter path (git pathspec syntax is
+		// supported); the value is already after the `--` pathspec separator, so it cannot be
+		// misinterpreted as a git option
+		if (filterPath !== null && filterPath !== '') {
+			args.push(filterPath);
+		}
 
 		return this.spawnGit(args, repo, (stdoutBuf) => {
 			const text = stdoutBuf.toString().replace(/\0$/, ''); // trim trailing NUL
@@ -1715,9 +1865,10 @@ export class DataSource extends Disposable {
 	 * @param showRemoteBranches Are remote branches shown.
 	 * @param showRemoteHeads Are remote heads shown.
 	 * @param hideRemotes An array of hidden remotes.
+	 * @param showChangeRefs Should Gerrit change refs (refs/remotes/<remote>/changes/*) be displayed as remote branch refs.
 	 * @returns The references data.
 	 */
-	private getRefs(repo: string, showRemoteBranches: boolean, showRemoteHeads: boolean, hideRemotes: ReadonlyArray<string>) {
+	private getRefs(repo: string, showRemoteBranches: boolean, showRemoteHeads: boolean, hideRemotes: ReadonlyArray<string>, showChangeRefs: boolean = false) {
 		let args = ['show-ref'];
 		if (!showRemoteBranches) args.push('--heads', '--tags');
 		args.push('-d', '--head');
@@ -1750,7 +1901,9 @@ export class DataSource extends Disposable {
 							if (annotated) name = name.substring(0, name.length - 3);
 							refData.tags.push({ hash: hash, name: name, annotated: annotated });
 						} else if (changesIndex > -1) {
-							// Gerrit change ref (refs/remotes/<remote>/changes/...) - not displayed as a remote branch ref
+							// Gerrit change ref (refs/remotes/<remote>/changes/...) - displayed as a remote branch
+							// ref when "Show Refs" is enabled (NoteDb meta refs are never displayed)
+							if (showChangeRefs && !remoteRef.endsWith('/meta')) refData.remotes.push({ hash: hash, name: remoteRef });
 						} else {
 							refData.remotes.push({ hash: hash, name: remoteRef });
 						}
@@ -1985,6 +2138,35 @@ export class DataSource extends Disposable {
 	 */
 	public runGitCommand(args: string[], repo: string): Promise<ErrorInfo> {
 		return this._spawnGit(args, repo, () => null).catch((errorMessage: string) => errorMessage);
+	}
+
+	/**
+	 * Run a Git command that reads a command stream from its standard input (e.g.
+	 * `git update-ref --stdin`, used to batch many ref updates into a single Git process).
+	 * @param args The arguments to pass to Git.
+	 * @param repo The repository to run the command in.
+	 * @param input The command stream to write to the standard input of the Git process.
+	 * @returns The returned ErrorInfo (suitable for being sent to the Git Graph View).
+	 */
+	public runGitCommandWithInput(args: string[], repo: string, input: string): Promise<ErrorInfo> {
+		return new Promise<ErrorInfo>((resolve) => {
+			if (this.gitExecutable === null) {
+				return resolve(UNABLE_TO_FIND_GIT_MSG);
+			}
+
+			const cmd = cp.spawn(this.gitExecutable.path, args, {
+				cwd: repo,
+				env: Object.assign({}, process.env, this.askpassEnv)
+			});
+			let stderr = '';
+			cmd.stderr.on('data', (d: Buffer) => { stderr += d; });
+			cmd.on('error', (error) => resolve(error.message));
+			cmd.on('close', (code) => resolve(code === 0 ? null : getErrorMessage(null, Buffer.alloc(0), stderr)));
+			cmd.stdin.on('error', () => { /* ignore EPIPE: the command already failed */ });
+			cmd.stdin.end(input);
+
+			this.logger.logCmd('git', args);
+		});
 	}
 
 	/**

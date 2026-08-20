@@ -312,6 +312,22 @@ class Dialog {
 	}
 
 	/**
+	 * Replace the dialog's bottom Close button with an ✕ icon in the top-right corner of the dialog.
+	 * Must be called after the dialog content has been rendered (e.g. directly after showMessage).
+	 */
+	public useCloseIcon() {
+		if (this.elem === null) return;
+		const secondaryAction = document.getElementById('dialogSecondaryAction');
+		if (secondaryAction !== null) secondaryAction.style.display = 'none';
+		const closeIcon = document.createElement('span');
+		closeIcon.id = 'dialogCloseIcon';
+		closeIcon.title = 'Close';
+		closeIcon.innerHTML = SVG_ICONS.close;
+		closeIcon.addEventListener('click', () => this.close());
+		this.elem.appendChild(closeIcon);
+	}
+
+	/**
 	 * Register a click handler on every element inside the currently open dialog matching a selector.
 	 * Must be called after the dialog content has been rendered (e.g. directly after showMessage).
 	 * @param selector The CSS selector of the elements to register the handler on.

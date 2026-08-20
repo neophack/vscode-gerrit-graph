@@ -14,7 +14,7 @@ export class RepoFileWatcher {
 	private fsWatcher: vscode.FileSystemWatcher | null = null;
 	private fsWatcherGit: vscode.FileSystemWatcher | null = null;
 	private refreshTimeout: NodeJS.Timer | null = null;
-	private muted: boolean = false;
+	private muteCount: number = 0;
 	private resumeAt: number = 0;
 
 	/**
@@ -73,17 +73,21 @@ export class RepoFileWatcher {
 	}
 
 	/**
-	 * Mute file events - Used to prevent many file events from being triggered when a Git action is executed by the Git Graph View.
+	 * Mute file events - Used to prevent many file events from being triggered when a Git action is
+	 * executed by the Git Graph View. Mute requests are counted, so that concurrent Git actions each
+	 * need to be completed (via a call to `unmute`) before file events are resumed.
 	 */
 	public mute() {
-		this.muted = true;
+		this.muteCount++;
 	}
 
 	/**
-	 * Unmute file events - Used to resume normal watching after a Git action executed by the Git Graph View has completed.
+	 * Unmute file events - Used to resume normal watching after a Git action executed by the Git
+	 * Graph View has completed. The mute count is clamped at zero to recover from any unbalanced
+	 * unmute call.
 	 */
 	public unmute() {
-		this.muted = false;
+		if (this.muteCount > 0) this.muteCount--;
 		this.resumeAt = (new Date()).getTime() + 1500;
 	}
 
@@ -93,7 +97,8 @@ export class RepoFileWatcher {
 	 * @param uri The URI of the file that the event occurred on.
 	 */
 	private refresh(uri: vscode.Uri) {
-		if (this.muted) return;
+		if (this.muteCount > 0) return;
+		if (this.repo === null) return;
 		if (!getPathFromUri(uri).replace(this.repo + '/', '').match(FILE_CHANGE_REGEX)) return;
 		if ((new Date()).getTime() < this.resumeAt) return;
 

@@ -69,11 +69,10 @@ describe('Webview smoke test (media/out.min.js)', () => {
 			'<span id="branchControl"><div id="branchDropdown" class="dropdown"></div></span>' +
 			'<span id="authorControl"><div id="authorDropdown" class="dropdown"></div></span>' +
 			'<label id="showRemoteBranchesControl"><input type="checkbox" id="showRemoteBranchesCheckbox" tabindex="-1"></label>' +
-			'<div id="currentBtn"></div><div id="findBtn"></div><div id="terminalBtn"></div><div id="settingsBtn"></div><div id="fetchBtn"></div><div id="refreshBtn"></div>' +
+			'<div id="currentBtn"></div><div id="findBtn"></div><div id="filterBtn"></div><div id="terminalBtn"></div><div id="settingsBtn"></div><div id="fetchBtn"></div><div id="refreshBtn"></div>' +
 			'</div>' +
 			'<div id="gerritControls">' +
 			'<span class="gerritRowLabel">Gerrit:</span>' +
-			'<label id="gerritShowRefsControl"><input type="checkbox" id="gerritShowRefsCheckbox" tabindex="-1"></label>' +
 			'<span id="gerritFilterControl"></span>' +
 			'<div id="gerritAmendBtn"></div>' +
 			'<div id="gerritSubmitBtn"></div>' +
@@ -97,11 +96,15 @@ describe('Webview smoke test (media/out.min.js)', () => {
 		(window as any).Element.prototype.scroll = () => undefined;
 		window.dispatchEvent(new Event('load'));
 
-		// The Gerrit controls row should be initialised: 4 status chips, labelled amend/submit/clear buttons and the Show Refs checkbox
+		// The Gerrit controls row should be initialised: 4 status chips and labelled amend/submit/clear buttons
 		expect(document.getElementById('gerritFilterControl')!.querySelectorAll('.gerritFilterChip').length).toBe(4);
-		expect(document.getElementById('gerritAmendBtn')!.textContent).toContain('Amend Change-Id');
-		expect(document.getElementById('gerritSubmitBtn')!.textContent).toContain('Submit Review');
-		expect(document.getElementById('gerritClearRefsBtn')!.textContent).toContain('Clear Refs');
-		expect((document.getElementById('gerritShowRefsCheckbox') as any).checked).toBe(true);
+		expect(document.getElementById('gerritAmendBtn')!.textContent).toContain('Amend');
+		expect(document.getElementById('gerritSubmitBtn')!.textContent).toContain('Submit');
+		expect(document.getElementById('gerritClearRefsBtn')!.textContent).toContain('Clear');
+
+		// The path filter button should be initialised with the filter icon and an inactive state
+		expect(document.getElementById('filterBtn')!.innerHTML).toContain('<svg');
+		expect(document.getElementById('filterBtn')!.title).toContain('Filter Commits by Path');
+		expect(document.getElementById('filterBtn')!.className).not.toContain('active');
 	});
 });

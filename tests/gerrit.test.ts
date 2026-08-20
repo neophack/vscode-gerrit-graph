@@ -348,7 +348,8 @@ describe('Gerrit', () => {
 		const urlBaseOf = (remoteUrl: string) => {
 			const fakeGit = {
 				gitOutput: (_args: any, _repo: any, resolve: { (stdout: string): any }) => Promise.resolve(resolve(remoteUrl)),
-				runGitCommand: () => Promise.resolve(null)
+				runGitCommand: () => Promise.resolve(null),
+				runGitCommandWithInput: () => Promise.resolve(null)
 			};
 			return new GerritDataSource(fakeGit).getChangeUrlBase('/repo', 'origin');
 		};
@@ -373,41 +374,109 @@ describe('Gerrit', () => {
 			'refs/remotes/origin/changes/66/41466/meta',
 			'refs/remotes/origin/changes/05/41005/2'
 		].join('\n');
-		const clearWith = (runGitCommand: any) => {
-			const deletions: string[][] = [];
+		const clearWith = (runGitCommandWithInput: (args: string[], input: string) => Promise<any>) => {
+			const inputs: { args: string[], input: string }[] = [];
 			const fakeGit = {
 				gitOutput: (args: any, _repo: any, resolve: { (stdout: string): any }) => {
 					// Respond to the `for-each-ref refs/remotes/origin/changes/` listing
 					expect(args).toEqual(['for-each-ref', 'refs/remotes/origin/changes/', '--format=%(refname)']);
 					return Promise.resolve(resolve(localRefs));
 				},
-				runGitCommand: (args: string[], _repo: string) => {
-					deletions.push(args);
-					return runGitCommand(args);
+				runGitCommand: () => Promise.resolve(null),
+				runGitCommandWithInput: (args: string[], _repo: string, input: string) => {
+					inputs.push({ args: args, input: input });
+					return runGitCommandWithInput(args, input);
 				}
 			};
-			return { promise: new GerritDataSource(fakeGit).clearLocalChanges('/repo', 'origin'), deletions: deletions };
+			return { promise: new GerritDataSource(fakeGit).clearLocalChanges('/repo', 'origin'), inputs: inputs };
 		};
-		it('deletes every local change ref with git update-ref -d', async () => {
-			const { promise, deletions } = clearWith(() => Promise.resolve(null));
+		it('deletes every local change ref with ONE batched git update-ref --stdin command', async () => {
+			const { promise, inputs } = clearWith(() => Promise.resolve(null));
 			expect(await promise).toEqual({ error: null, cleared: 3 });
-			expect(deletions).toEqual([
-				['update-ref', '-d', 'refs/remotes/origin/changes/66/41466/1'],
-				['update-ref', '-d', 'refs/remotes/origin/changes/66/41466/meta'],
-				['update-ref', '-d', 'refs/remotes/origin/changes/05/41005/2']
-			]);
+			expect(inputs).toEqual([{
+				args: ['update-ref', '--stdin'],
+				input: 'delete refs/remotes/origin/changes/66/41466/1\ndelete refs/remotes/origin/changes/66/41466/meta\ndelete refs/remotes/origin/changes/05/41005/2\n'
+			}]);
 		});
-		it('reports the first failed deletion but keeps deleting the remaining refs', async () => {
-			const { promise, deletions } = clearWith((args: string[]) => Promise.resolve(args[2].endsWith('/meta') ? 'error: unable to delete ref' : null));
-			expect(await promise).toEqual({ error: 'error: unable to delete ref', cleared: 2 });
-			expect(deletions.length).toBe(3);
+		it('reports the error and clears nothing when the (atomic) batch deletion fails', async () => {
+			const { promise, inputs } = clearWith(() => Promise.resolve('error: unable to delete ref'));
+			expect(await promise).toEqual({ error: 'error: unable to delete ref', cleared: 0 });
+			expect(inputs.length).toBe(1);
 		});
 		it('clears nothing when no local change refs exist', async () => {
 			const fakeGit = {
 				gitOutput: (_args: any, _repo: any, resolve: { (stdout: string): any }) => Promise.resolve(resolve('')),
-				runGitCommand: () => Promise.resolve(null)
+				runGitCommand: () => Promise.resolve(null),
+				runGitCommandWithInput: () => Promise.resolve(null)
 			};
 			expect(await new GerritDataSource(fakeGit).clearLocalChanges('/repo', 'origin')).toEqual({ error: null, cleared: 0 });
+		});
+	});
+
+	describe('parseMetas (concurrent NoteDb meta parsing)', () => {
+		/**
+		 * A fake GitRunner serving two changes: 41466 (one event) and 41005 (two events).
+		 * `hashes` holds the meta ref hashes, `logs` the `git log <metaRef>` outputs.
+		 */
+		const fakeRunner = (hashes: { [ref: string]: string }, logs: { [ref: string]: string }) => {
+			const logCommands: string[][] = [];
+			const git = {
+				gitOutput: (args: string[], _repo: string, resolve: { (stdout: string): any }) => {
+					if (args[0] === 'for-each-ref') {
+						const output = Object.keys(hashes).map((ref) => ref + '\0' + hashes[ref]).join('\n');
+						return Promise.resolve(resolve(output));
+					}
+					// `git log <metaRef> --format=...`
+					logCommands.push(args);
+					return Promise.resolve(resolve(logs[args[1]] || ''));
+				},
+				runGitCommand: () => Promise.resolve(null),
+				runGitCommandWithInput: () => Promise.resolve(null)
+			};
+			return { git: git, logCommands: logCommands };
+		};
+		const hashA = 'a'.repeat(40), hashB = 'b'.repeat(40);
+		const refA = 'refs/remotes/origin/changes/66/41466/meta', refB = 'refs/remotes/origin/changes/05/41005/meta';
+		const logOf = (messages: string[]) => messages.map((message) => 'Committer <c@gerrit.local>\u001f' + 1700000000 + '\u001f' + message + '\n').join('\u001e');
+
+		it('parses every change and returns the states in the input order', async () => {
+			const { git, logCommands } = fakeRunner(
+				{ [refA]: hashA, [refB]: hashB },
+				{
+					[refA]: logOf(['Create change\n\nPatch-set: 1\nCommit: ' + '1'.repeat(40) + '\nStatus: new\n']),
+					[refB]: logOf([
+						'Patch Set 2: Code-Review+2\n\nPatch-set: 2\nCommit: ' + '2'.repeat(40) + '\nLabel: Code-Review=+2\nStatus: new\n',
+						'Create change\n\nPatch-set: 1\nCommit: ' + '2'.repeat(40) + '\nStatus: new\n'
+					])
+				}
+			);
+			const states = await new GerritDataSource(git).parseMetas('/repo', 'origin', [41005, 41466], null);
+			expect(Array.from(states.keys())).toEqual([41005, 41466]); // input order, not completion order
+			expect(states.get(41466)).toMatchObject({ change: 41466, status: 'new', patchset: 1 });
+			expect(states.get(41005)).toMatchObject({ change: 41005, status: 'new', patchset: 2, codeReview: 2 });
+			// one batched hash resolution + one `git log` per change
+			expect(logCommands.length).toBe(2);
+		});
+
+		it('maps changes without a local meta ref to null (without running any Git log)', async () => {
+			const { git, logCommands } = fakeRunner({ [refA]: hashA }, { [refA]: logOf(['Create change\n\nPatch-set: 1\nCommit: ' + '1'.repeat(40) + '\nStatus: new\n']) });
+			const states = await new GerritDataSource(git).parseMetas('/repo', 'origin', [41466, 41005], null);
+			expect(states.get(41466)).not.toBeNull();
+			expect(states.get(41005)).toBeNull();
+			expect(logCommands.length).toBe(1);
+		});
+
+		it('serves a second parse of the same meta hashes from the cache', async () => {
+			const { git, logCommands } = fakeRunner({ [refA]: hashA, [refB]: hashB }, {
+				[refA]: logOf(['Create change\n\nPatch-set: 1\nCommit: ' + '1'.repeat(40) + '\nStatus: new\n']),
+				[refB]: logOf(['Create change\n\nPatch-set: 1\nCommit: ' + '2'.repeat(40) + '\nStatus: new\n'])
+			});
+			const gerrit = new GerritDataSource(git);
+			await gerrit.parseMetas('/repo', 'origin', [41466, 41005], null);
+			const first = logCommands.length;
+			const states = await gerrit.parseMetas('/repo', 'origin', [41466, 41005], 'https://gerrit.example.com/c/repo/+/');
+			expect(logCommands.length).toBe(first); // no additional Git log command was spawned
+			expect(states.get(41466)!.url).toBeNull(); // cached states keep the url of their first parse
 		});
 	});
 

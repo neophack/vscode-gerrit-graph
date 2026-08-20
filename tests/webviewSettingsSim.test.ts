@@ -65,7 +65,6 @@ const VIEW_HTML = '<div id="view" tabindex="-1">' +
 	'<label id="showRemoteBranchesControl"><input type="checkbox" id="showRemoteBranchesCheckbox"></label>' +
 	'<div id="currentBtn"></div><div id="findBtn"></div><div id="terminalBtn"></div><div id="settingsBtn"></div><div id="fetchBtn"></div><div id="refreshBtn"></div></div>' +
 	'<div id="gerritControls"><span class="gerritRowLabel">Gerrit:</span>' +
-	'<label id="gerritShowRefsControl"><input type="checkbox" id="gerritShowRefsCheckbox"></label>' +
 		'<span id="gerritFilterControl"></span><div id="gerritAmendBtn"></div><div id="gerritSubmitBtn"></div><div id="gerritClearRefsBtn"></div></div>' +
 	'<div id="content"><div id="commitGraph"></div><div id="commitTable"></div></div>' +
 	'<div id="footer"></div></div>';
