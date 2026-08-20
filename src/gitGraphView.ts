@@ -110,7 +110,7 @@ export class GitGraphView extends Disposable {
 		this.loadViewTo = loadViewTo;
 
 		const config = getConfig();
-		this.panel = vscode.window.createWebviewPanel('gerrit-graph', 'Gerrit Graph', column || vscode.ViewColumn.One, {
+		this.panel = vscode.window.createWebviewPanel('review-graph', 'Review Graph', column || vscode.ViewColumn.One, {
 			enableScripts: true,
 			localResourceRoots: [vscode.Uri.file(path.join(extensionPath, 'media'))],
 			retainContextWhenHidden: config.retainContextWhenHidden
@@ -175,7 +175,7 @@ export class GitGraphView extends Disposable {
 
 			// Update the Git Graph View when the configuration changes
 			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration('gerrit-graph')) {
+				if (e.affectsConfiguration('review-graph')) {
 					const config = getConfig();
 					this.panel.iconPath = config.tabIconColourTheme === TabIconColourTheme.Colour
 						? this.getResourcesUri('gerrit-webview-icon.svg')
@@ -212,7 +212,7 @@ export class GitGraphView extends Disposable {
 			await this.handleMessage(msg);
 		} catch (error) {
 			this.logger.logError('Failed to handle "' + msg.command + '" message: ' + error);
-			showErrorMessage('Gerrit Graph encountered an error while handling this action.');
+			showErrorMessage('Review Graph encountered an error while handling this action.');
 		} finally {
 			this.repoFileWatcher.unmute();
 		}
@@ -855,7 +855,7 @@ export class GitGraphView extends Disposable {
 
 		if (this.dataSource.isGitExecutableUnknown()) {
 			body = `<body class="unableToLoad">
-			<h2>Unable to load Gerrit Graph</h2>
+			<h2>Unable to load Review Graph</h2>
 			<p class="unableToLoadMessage">${UNABLE_TO_FIND_GIT_MSG}</p>
 			</body>`;
 		} else if (numRepos > 0) {
@@ -896,9 +896,9 @@ export class GitGraphView extends Disposable {
 			</body>`;
 		} else {
 			body = `<body class="unableToLoad">
-			<h2>Unable to load Gerrit Graph</h2>
+			<h2>Unable to load Review Graph</h2>
 			<p class="unableToLoadMessage">No Git repositories were found in the current workspace when it was last scanned by Git Graph.</p>
-			<p>If your repositories are in subfolders of the open workspace folder(s), make sure you have set the Git Graph Setting "gerrit-graph.maxDepthOfRepoSearch" appropriately (read the <a href="https://github.com/mhutchie/vscode-git-graph/wiki/Extension-Settings#max-depth-of-repo-search" target="_blank">documentation</a> for more information).</p>
+			<p>If your repositories are in subfolders of the open workspace folder(s), make sure you have set the Git Graph Setting "review-graph.maxDepthOfRepoSearch" appropriately (read the <a href="https://github.com/mhutchie/vscode-git-graph/wiki/Extension-Settings#max-depth-of-repo-search" target="_blank">documentation</a> for more information).</p>
 			<p><div id="rescanForReposBtn" class="roundedBtn">Re-scan the current workspace for repositories</div></p>
 			<script nonce="${nonce}">(function(){ var api = acquireVsCodeApi(); document.getElementById('rescanForReposBtn').addEventListener('click', function(){ api.postMessage({command: 'rescanForRepos'}); }); })();</script>
 			</body>`;
@@ -1092,7 +1092,7 @@ export class GitGraphView extends Disposable {
 			limit = getConfig().gerrit.fetchLimit;
 		}
 
-		const config = vscode.workspace.getConfiguration('gerrit-graph');
+		const config = vscode.workspace.getConfiguration('review-graph');
 		try {
 			await config.update('gerrit.fetchMode', fetchMode, vscode.ConfigurationTarget.Global);
 			await config.update('gerrit.fetchLimit', limit, vscode.ConfigurationTarget.Global);

@@ -648,7 +648,9 @@ export class GerritDataSource {
 			if (!/^https?:\/\//i.test(url)) return null;
 			const match = /^(https?:\/\/[^\/]+)\/?(.+?)(?:\.git)?\/?$/i.exec(url);
 			if (match === null) return null;
-			return match[1] + '/c/' + match[2] + '/+/';
+			// Strip Gerrit's authenticated prefix ("a/") from the project path; it is not part of the web UI URL
+			const project = match[2].replace(/^a\//, '');
+			return match[1] + '/c/' + project + '/+/';
 		}).catch(() => null);
 	}
 }

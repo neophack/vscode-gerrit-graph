@@ -367,7 +367,8 @@ export type LoadGitGraphViewTo = {
 		readonly compareWithHash: string | null
 	},
 	readonly findCommitHash?: string,
-	readonly runCommandOnLoad?: 'fetch'
+	readonly runCommandOnLoad?: 'fetch',
+	readonly filterPath?: string
 } | null;
 
 export interface MuteCommitsConfig {

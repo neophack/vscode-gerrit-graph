@@ -732,7 +732,7 @@ class SettingsWidget {
 			{
 				type: DialogInputType.Select, name: 'Provider',
 				options: providerOptions, default: defaultProvider,
-				info: 'In addition to the built-in publicly hosted Pull Request providers, custom providers can be configured using the Extension Setting "gerrit-graph.customPullRequestProviders" (e.g. for use with privately hosted Pull Request providers).'
+				info: 'In addition to the built-in publicly hosted Pull Request providers, custom providers can be configured using the Extension Setting "review-graph.customPullRequestProviders" (e.g. for use with privately hosted Pull Request providers).'
 			},
 			{
 				type: DialogInputType.Select, name: 'Source Remote',

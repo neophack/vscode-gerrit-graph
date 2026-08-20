@@ -1,4 +1,5 @@
 import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { AvatarManager } from './avatarManager';
 import { getConfig } from './config';
@@ -46,17 +47,18 @@ export class CommandManager extends Disposable {
 		this.gitExecutable = gitExecutable;
 
 		// Register Extension Commands
-		this.registerCommand('gerrit-graph.view', (arg) => this.view(arg));
-		this.registerCommand('gerrit-graph.addGitRepository', () => this.addGitRepository());
-		this.registerCommand('gerrit-graph.removeGitRepository', () => this.removeGitRepository());
-		this.registerCommand('gerrit-graph.clearAvatarCache', () => this.clearAvatarCache());
-		this.registerCommand('gerrit-graph.fetch', () => this.fetch());
-		this.registerCommand('gerrit-graph.endAllWorkspaceCodeReviews', () => this.endAllWorkspaceCodeReviews());
-		this.registerCommand('gerrit-graph.endSpecificWorkspaceCodeReview', () => this.endSpecificWorkspaceCodeReview());
-		this.registerCommand('gerrit-graph.resumeWorkspaceCodeReview', () => this.resumeWorkspaceCodeReview());
-		this.registerCommand('gerrit-graph.version', () => this.version());
-		this.registerCommand('gerrit-graph.searchCommits', () => this.searchCommits());
-		this.registerCommand('gerrit-graph.openFile', (arg) => this.openFile(arg));
+		this.registerCommand('review-graph.view', (arg) => this.view(arg));
+		this.registerCommand('review-graph.filterByFile', (arg) => this.filterByFile(arg));
+		this.registerCommand('review-graph.addGitRepository', () => this.addGitRepository());
+		this.registerCommand('review-graph.removeGitRepository', () => this.removeGitRepository());
+		this.registerCommand('review-graph.clearAvatarCache', () => this.clearAvatarCache());
+		this.registerCommand('review-graph.fetch', () => this.fetch());
+		this.registerCommand('review-graph.endAllWorkspaceCodeReviews', () => this.endAllWorkspaceCodeReviews());
+		this.registerCommand('review-graph.endSpecificWorkspaceCodeReview', () => this.endSpecificWorkspaceCodeReview());
+		this.registerCommand('review-graph.resumeWorkspaceCodeReview', () => this.resumeWorkspaceCodeReview());
+		this.registerCommand('review-graph.version', () => this.version());
+		this.registerCommand('review-graph.searchCommits', () => this.searchCommits());
+		this.registerCommand('review-graph.openFile', (arg) => this.openFile(arg));
 
 		this.registerDisposable(
 			onDidChangeGitExecutable((gitExecutable) => {
@@ -66,9 +68,9 @@ export class CommandManager extends Disposable {
 
 		// Register Extension Contexts
 		try {
-			this.registerContext('gerrit-graph:codiconsSupported', doesVersionMeetRequirement(vscode.version, VsCodeVersionRequirement.Codicons));
+			this.registerContext('review-graph:codiconsSupported', doesVersionMeetRequirement(vscode.version, VsCodeVersionRequirement.Codicons));
 		} catch (_) {
-			this.logger.logError('Unable to set Visual Studio Code Context "gerrit-graph:codiconsSupported"');
+			this.logger.logError('Unable to set Visual Studio Code Context "review-graph:codiconsSupported"');
 		}
 	}
 
@@ -112,7 +114,7 @@ export class CommandManager extends Disposable {
 	/* Commands */
 
 	/**
-	 * The method run when the `gerrit-graph.view` command is invoked.
+	 * The method run when the `review-graph.view` command is invoked.
 	 * @param arg An optional argument passed to the command (when invoked from the Visual Studio Code Git Extension).
 	 */
 	private async view(arg: any) {
@@ -135,7 +137,49 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.addGitRepository` command is invoked.
+	 * The method run when the `review-graph.filterByFile` command is invoked.
+	 * Opens the Git Graph view filtered to only show commits that modified the specified file.
+	 * @param arg The argument passed to the command (a file URI, or an object containing a file URI).
+	 */
+	private async filterByFile(arg: any) {
+		const uri = this.getUriFromCommandArg(arg);
+		if (uri === null) {
+			showErrorMessage('Unable to determine the file to filter the Git Graph view by.');
+			return;
+		}
+
+		const filePath = getPathFromUri(uri);
+		const repo = this.repoManager.getRepoContainingFile(filePath);
+		if (repo === null) {
+			showErrorMessage('The file "' + filePath + '" is not within a repository known to Git Graph.');
+			return;
+		}
+
+		// Compute the path of the file relative to the repository root (using forward slashes, as expected by git)
+		let filterPath = path.relative(repo, filePath).replace(/\\/g, '/');
+		if (filterPath === '') filterPath = '.';
+
+		GitGraphView.createOrShow(this.context.extensionPath, this.dataSource, this.extensionState, this.avatarManager, this.repoManager, this.logger, { repo: repo, filterPath: filterPath });
+	}
+
+	/**
+	 * Extract a file URI from a command argument (a URI, or an object/array containing a URI).
+	 * @param arg The argument passed to the command.
+	 * @returns The file URI, or NULL if it could not be determined.
+	 */
+	private getUriFromCommandArg(arg: any): vscode.Uri | null {
+		if (Array.isArray(arg) && arg.length > 0) arg = arg[0];
+		if (arg && arg.resourceUri) return arg.resourceUri; // e.g. a SourceControlResourceState
+		if (arg && arg.uri && arg.uri.scheme) return arg.uri;
+		if (arg && arg.scheme && arg.fsPath) return arg; // a URI
+		if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.scheme === 'file') {
+			return vscode.window.activeTextEditor.document.uri;
+		}
+		return null;
+	}
+
+	/**
+	 * The method run when the `review-graph.addGitRepository` command is invoked.
 	 */
 	private addGitRepository() {
 		if (this.gitExecutable === null) {
@@ -162,7 +206,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.removeGitRepository` command is invoked.
+	 * The method run when the `review-graph.removeGitRepository` command is invoked.
 	 */
 	private removeGitRepository() {
 		if (this.gitExecutable === null) {
@@ -177,7 +221,7 @@ export class CommandManager extends Disposable {
 		}));
 
 		vscode.window.showQuickPick(items, {
-			placeHolder: 'Select a repository to remove from Gerrit Graph:',
+			placeHolder: 'Select a repository to remove from Review Graph:',
 			canPickMany: false
 		}).then((item) => {
 			if (item && item.description !== undefined) {
@@ -191,7 +235,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.clearAvatarCache` command is invoked.
+	 * The method run when the `review-graph.clearAvatarCache` command is invoked.
 	 */
 	private clearAvatarCache() {
 		this.avatarManager.clearCache().then((errorInfo) => {
@@ -206,7 +250,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.fetch` command is invoked.
+	 * The method run when the `review-graph.fetch` command is invoked.
 	 */
 	private fetch() {
 		const repos = this.repoManager.getRepos();
@@ -251,7 +295,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.endAllWorkspaceCodeReviews` command is invoked.
+	 * The method run when the `review-graph.endAllWorkspaceCodeReviews` command is invoked.
 	 */
 	private endAllWorkspaceCodeReviews() {
 		this.extensionState.endAllWorkspaceCodeReviews();
@@ -259,7 +303,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.endSpecificWorkspaceCodeReview` command is invoked.
+	 * The method run when the `review-graph.endSpecificWorkspaceCodeReview` command is invoked.
 	 */
 	private endSpecificWorkspaceCodeReview() {
 		const codeReviews = this.extensionState.getCodeReviews();
@@ -287,7 +331,7 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.resumeWorkspaceCodeReview` command is invoked.
+	 * The method run when the `review-graph.resumeWorkspaceCodeReview` command is invoked.
 	 */
 	private resumeWorkspaceCodeReview() {
 		const codeReviews = this.extensionState.getCodeReviews();
@@ -316,10 +360,10 @@ export class CommandManager extends Disposable {
 	}
 
 	/**
-	 * The method run when the `gerrit-graph.version` command is invoked.
+	 * The method run when the `review-graph.version` command is invoked.
 	 */
 	/**
-	 * The method run when the `gerrit-graph.searchCommits` command is invoked.
+	 * The method run when the `review-graph.searchCommits` command is invoked.
 	 */
 	private async searchCommits() {
 		if (this.gitExecutable === null) {
@@ -358,7 +402,7 @@ export class CommandManager extends Disposable {
 				commitHash: c.hash
 			}));
 			const selected = await vscode.window.showQuickPick(items, {
-				placeHolder: 'Select a commit to view in Gerrit Graph',
+				placeHolder: 'Select a commit to view in Review Graph',
 				matchOnDescription: true,
 				matchOnDetail: true
 			});
@@ -373,7 +417,7 @@ export class CommandManager extends Disposable {
 	private async version() {
 		try {
 			const gitGraphVersion = await getExtensionVersion(this.context);
-			const information = 'Gerrit Graph: ' + gitGraphVersion + '\nVisual Studio Code: ' + vscode.version + '\nOS: ' + os.type() + ' ' + os.arch() + ' ' + os.release() + '\nGit: ' + (this.gitExecutable !== null ? this.gitExecutable.version : '(none)');
+			const information = 'Review Graph: ' + gitGraphVersion + '\nVisual Studio Code: ' + vscode.version + '\nOS: ' + os.type() + ' ' + os.arch() + ' ' + os.release() + '\nGit: ' + (this.gitExecutable !== null ? this.gitExecutable.version : '(none)');
 			vscode.window.showInformationMessage(information, { modal: true }, 'Copy').then((selectedItem) => {
 				if (selectedItem === 'Copy') {
 					copyToClipboard(information).then((result) => {
@@ -390,7 +434,7 @@ export class CommandManager extends Disposable {
 
 	/**
 	 * Opens a file in Visual Studio Code, based on a Git Graph URI (from the Diff View).
-	 * The method run when the `gerrit-graph.openFile` command is invoked.
+	 * The method run when the `review-graph.openFile` command is invoked.
 	 * @param arg The Git Graph URI.
 	 */
 	private openFile(arg?: vscode.Uri) {

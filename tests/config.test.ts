@@ -21,7 +21,7 @@ describe('Config', () => {
 		getConfig();
 
 		// Assert
-		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', undefined);
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('review-graph', undefined);
 	});
 
 	it('Should construct a Config instance (for a specific repository)', () => {
@@ -29,7 +29,7 @@ describe('Config', () => {
 		getConfig('/path/to/repo');
 
 		// Assert
-		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', {
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('review-graph', {
 			scheme: 'file',
 			authority: '',
 			path: '/path/to/repo',

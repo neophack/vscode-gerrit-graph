@@ -92,9 +92,9 @@ export class DataSource extends Disposable {
 		this.registerDisposables(
 			onDidChangeConfiguration((event) => {
 				if (
-					event.affectsConfiguration('gerrit-graph.date.type') || event.affectsConfiguration('gerrit-graph.dateType') ||
-					event.affectsConfiguration('gerrit-graph.repository.commits.showSignatureStatus') || event.affectsConfiguration('gerrit-graph.showSignatureStatus') ||
-					event.affectsConfiguration('gerrit-graph.repository.useMailmap') || event.affectsConfiguration('gerrit-graph.useMailmap')
+					event.affectsConfiguration('review-graph.date.type') || event.affectsConfiguration('review-graph.dateType') ||
+					event.affectsConfiguration('review-graph.repository.commits.showSignatureStatus') || event.affectsConfiguration('review-graph.showSignatureStatus') ||
+					event.affectsConfiguration('review-graph.repository.useMailmap') || event.affectsConfiguration('review-graph.useMailmap')
 				) {
 					this.generateGitCommandFormats();
 				}
@@ -1830,9 +1830,18 @@ export class DataSource extends Disposable {
 		if (gerritRefs !== null) {
 			for (const ref of gerritRefs) args.push(ref);
 		}
+		if (filterPath !== null && filterPath !== '') {
+			// Show commits that modified the file(s) at the filter path (git pathspec syntax is
+			// supported), from all parents across all branches (--full-history). Without
+			// --simplify-merges, git's default history simplification prints the ORIGINAL parent
+			// hashes of each shown commit (which may refer to commits that are themselves hidden,
+			// breaking the graph into disconnected fragments); --simplify-merges instead rewrites
+			// each shown commit's parents to its nearest shown ancestors, so the hidden commits
+			// are collapsed while the graph stays connected and the branch structure is preserved
+			args.push('--full-history', '--simplify-merges');
+		}
 		args.push('--');
-		// Only show commits that modified the file(s) at the filter path (git pathspec syntax is
-		// supported); the value is already after the `--` pathspec separator, so it cannot be
+		// The filter path is already after the `--` pathspec separator, so it cannot be
 		// misinterpreted as a git option
 		if (filterPath !== null && filterPath !== '') {
 			args.push(filterPath);

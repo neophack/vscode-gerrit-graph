@@ -32,9 +32,9 @@ describe('StatusBarItem', () => {
 		const statusBarItem = new StatusBarItem(1, onDidChangeRepos.subscribe, onDidChangeConfiguration.subscribe, logger);
 
 		// Assert
-		expect(vscodeStatusBarItem.text).toBe('Gerrit Graph');
-		expect(vscodeStatusBarItem.tooltip).toBe('View Gerrit Graph');
-		expect(vscodeStatusBarItem.command).toBe('gerrit-graph.view');
+		expect(vscodeStatusBarItem.text).toBe('Review Graph');
+		expect(vscodeStatusBarItem.tooltip).toBe('View Review Graph');
+		expect(vscodeStatusBarItem.command).toBe('review-graph.view');
 		expect(vscodeStatusBarItem.show).toHaveBeenCalledTimes(1);
 		expect(vscodeStatusBarItem.hide).toHaveBeenCalledTimes(0);
 
@@ -99,7 +99,7 @@ describe('StatusBarItem', () => {
 		statusBarItem.dispose();
 	});
 
-	it('Should hide the Status Bar Item the extension setting gerrit-graph.showStatusBarItem becomes disabled', () => {
+	it('Should hide the Status Bar Item the extension setting review-graph.showStatusBarItem becomes disabled', () => {
 		// Setup
 		vscode.mockExtensionSettingReturnValue('showStatusBarItem', true);
 
@@ -124,7 +124,7 @@ describe('StatusBarItem', () => {
 		statusBarItem.dispose();
 	});
 
-	it('Should ignore extension setting changes unrelated to gerrit-graph.showStatusBarItem', () => {
+	it('Should ignore extension setting changes unrelated to review-graph.showStatusBarItem', () => {
 		// Setup
 		vscode.mockExtensionSettingReturnValue('showStatusBarItem', true);
 

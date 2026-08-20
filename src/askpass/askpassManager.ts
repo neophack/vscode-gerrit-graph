@@ -77,7 +77,7 @@ export class AskpassManager extends Disposable {
 				res.end();
 				return;
 			}
-			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Gerrit Graph: ' + data.host, password: /password/i.test(data.request), ignoreFocusOut: true }).then(result => {
+			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Review Graph: ' + data.host, password: /password/i.test(data.request), ignoreFocusOut: true }).then(result => {
 				res.writeHead(200);
 				res.end(JSON.stringify(result || ''));
 			}, () => {

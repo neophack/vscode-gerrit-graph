@@ -20,7 +20,7 @@ describe('Logger', () => {
 		logger.dispose();
 
 		// Assert
-		expect(vscode.window.createOutputChannel).toHaveBeenCalledWith('Gerrit Graph');
+		expect(vscode.window.createOutputChannel).toHaveBeenCalledWith('Review Graph');
 		expect(outputChannel.dispose).toBeCalledTimes(1);
 	});
 

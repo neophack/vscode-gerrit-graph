@@ -14,7 +14,7 @@ export class Logger extends Disposable {
 	 */
 	constructor() {
 		super();
-		this.channel = vscode.window.createOutputChannel('Gerrit Graph');
+		this.channel = vscode.window.createOutputChannel('Review Graph');
 		this.registerDisposable(this.channel);
 	}
 

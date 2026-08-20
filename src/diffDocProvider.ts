@@ -14,7 +14,7 @@ export const enum DiffSide {
  * Manages providing a specific revision of a repository file for use in the Visual Studio Code Diff View.
  */
 export class DiffDocProvider extends Disposable implements vscode.TextDocumentContentProvider {
-	public static scheme = 'gerrit-graph';
+	public static scheme = 'review-graph';
 	private readonly dataSource: DataSource;
 	private readonly docs = new Map<string, DiffDocument>();
 	private readonly onDidChangeEventEmitter = new vscode.EventEmitter<vscode.Uri>();
@@ -43,7 +43,7 @@ export class DiffDocProvider extends Disposable implements vscode.TextDocumentCo
 
 	/**
 	 * Provides the content of a text document at a specific Git revision.
-	 * @param uri The `gerrit-graph://file.ext?encoded-data` URI.
+	 * @param uri The `review-graph://file.ext?encoded-data` URI.
 	 * @returns The content of the text document.
 	 */
 	public async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
@@ -100,7 +100,7 @@ class DiffDocument {
 /* Encoding and decoding URI's */
 
 /**
- * Represents the data passed through `gerrit-graph://file.ext?encoded-data` URI's by the DiffDocProvider.
+ * Represents the data passed through `review-graph://file.ext?encoded-data` URI's by the DiffDocProvider.
  */
 type DiffDocUriData = {
 	filePath: string;
@@ -116,7 +116,7 @@ type DiffDocUriData = {
  * @param commit The commit hash specifying the revision of the file.
  * @param type The Git file status of the change.
  * @param diffSide The side of the Diff View that this URI will be displayed on.
- * @returns A URI of the form `gerrit-graph://file.ext?encoded-data` or `file://path/file.ext`
+ * @returns A URI of the form `review-graph://file.ext?encoded-data` or `file://path/file.ext`
  */
 export function encodeDiffDocUri(repo: string, filePath: string, commit: string, type: GitFileStatus, diffSide: DiffSide): vscode.Uri {
 	if (commit === UNCOMMITTED && type !== GitFileStatus.Deleted) {
@@ -138,7 +138,7 @@ export function encodeDiffDocUri(repo: string, filePath: string, commit: string,
 }
 
 /**
- * Decode the data from a `gerrit-graph://file.ext?encoded-data` URI.
+ * Decode the data from a `review-graph://file.ext?encoded-data` URI.
  * @param uri The URI to decode data from.
  * @returns The decoded DiffDocUriData.
  */
@@ -152,6 +152,6 @@ export function decodeDiffDocUri(uri: vscode.Uri): DiffDocUriData {
 	try {
 		return JSON.parse(Buffer.from(query, 'base64').toString());
 	} catch (e) {
-		throw new Error('Unable to decode the Gerrit Graph diff document URI: the data is malformed.');
+		throw new Error('Unable to decode the Review Graph diff document URI: the data is malformed.');
 	}
 }

@@ -53,7 +53,7 @@ export class RepoManager extends Disposable {
 		this.ignoredRepos = extensionState.getIgnoredRepos();
 		this.maxDepthOfRepoSearch = getConfig().maxDepthOfRepoSearch;
 
-		this.configWatcher = vscode.workspace.createFileSystemWatcher('**/.vscode/gerrit-graph.json');
+		this.configWatcher = vscode.workspace.createFileSystemWatcher('**/.vscode/review-graph.json');
 		this.configWatcher.onDidCreate(this.onConfigWatcherCreateOrChange.bind(this));
 		this.configWatcher.onDidChange(this.onConfigWatcherCreateOrChange.bind(this));
 
@@ -98,7 +98,7 @@ export class RepoManager extends Disposable {
 
 			// Monitor changes to the maxDepthOfRepoSearch Extension Setting, and trigger a new search if needed
 			onDidChangeConfiguration((event) => {
-				if (event.affectsConfiguration('gerrit-graph.maxDepthOfRepoSearch')) {
+				if (event.affectsConfiguration('review-graph.maxDepthOfRepoSearch')) {
 					this.maxDepthOfRepoSearchChanged();
 				}
 			}),
@@ -136,7 +136,7 @@ export class RepoManager extends Disposable {
 	}
 
 	/**
-	 * Apply the new value of `gerrit-graph.maxDepthOfRepoSearch` to the RepoManager.
+	 * Apply the new value of `review-graph.maxDepthOfRepoSearch` to the RepoManager.
 	 */
 	private maxDepthOfRepoSearchChanged() {
 		const newDepth = getConfig().maxDepthOfRepoSearch;
@@ -669,7 +669,7 @@ export class RepoManager extends Disposable {
 						return true;
 					}
 				} else {
-					showErrorMessage('The value for "' + validationError + '" in the configuration file "' + getPathFromStr(path.join(repo, '.vscode', 'gerrit-graph.json')) + '" is invalid.');
+					showErrorMessage('The value for "' + validationError + '" in the configuration file "' + getPathFromStr(path.join(repo, '.vscode', 'review-graph.json')) + '" is invalid.');
 				}
 			}
 		} catch (_) { }
@@ -811,7 +811,7 @@ export namespace ExternalRepoConfig {
  */
 function readExternalConfigFile(repo: string) {
 	return new Promise<Readonly<ExternalRepoConfig.File> | null>((resolve) => {
-		fs.readFile(path.join(repo, '.vscode', 'gerrit-graph.json'), (err, data) => {
+		fs.readFile(path.join(repo, '.vscode', 'review-graph.json'), (err, data) => {
 			if (err) {
 				resolve(null);
 			} else {
@@ -837,7 +837,7 @@ function writeExternalConfigFile(repo: string, file: ExternalRepoConfig.File) {
 		const vscodePath = path.join(repo, '.vscode');
 		fs.mkdir(vscodePath, (err) => {
 			if (!err || err.code === 'EEXIST') {
-				const configPath = path.join(vscodePath, 'gerrit-graph.json');
+				const configPath = path.join(vscodePath, 'review-graph.json');
 				fs.writeFile(configPath, JSON.stringify(file, null, 4), (err) => {
 					if (err) {
 						reject('Failed to write the Git Graph Repository Configuration File to "' + getPathFromStr(configPath) + '".');

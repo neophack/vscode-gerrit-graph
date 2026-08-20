@@ -152,7 +152,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Added, DiffSide.Old);
 
 		// Assert
-		expect(uri.scheme).toBe('gerrit-graph');
+		expect(uri.scheme).toBe('review-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt (non-existent)');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjpmYWxzZX0=');
 	});
@@ -162,7 +162,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Deleted, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('gerrit-graph');
+		expect(uri.scheme).toBe('review-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt (non-existent)');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjpmYWxzZX0=');
 	});
@@ -172,7 +172,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Modified, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('gerrit-graph');
+		expect(uri.scheme).toBe('review-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjp0cnVlfQ==');
 	});
@@ -182,7 +182,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Modified, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('gerrit-graph');
+		expect(uri.scheme).toBe('review-graph');
 		expect(uri.fsPath).toBe('path/to/file');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZSIsImNvbW1pdCI6IjFhMmIzYzRkNWU2ZjFhMmIzYzRkNWU2ZjFhMmIzYzRkNWU2ZjFhMmIiLCJyZXBvIjoiL3JlcG8iLCJleGlzdHMiOnRydWV9');
 	});
@@ -192,7 +192,7 @@ describe('decodeDiffDocUri', () => {
 	it('Should return the parsed DiffDocUriData from the URI', () => {
 		// Run
 		const value = decodeDiffDocUri(vscode.Uri.file('file.txt').with({
-			scheme: 'gerrit-graph',
+			scheme: 'review-graph',
 			query: 'eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjp0cnVlfQ=='
 		}));
 

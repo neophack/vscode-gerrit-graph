@@ -58,6 +58,47 @@ This fork retains all the features of the original Git Graph extension, includin
 *   **Repository Settings**: Configure remotes, issue linking, and pull request creation.
 *   **Customization**: A wide range of settings to customize the look and feel of the graph.
 
+## Code Review
+
+This extension supports two complementary review workflows:
+
+### 1. Local Code Review Tracking
+
+Keep track of which files you have already reviewed, directly in the Commit Details & Comparison Views:
+
+*   Start or stop a Code Review at any time from the button on the right of the Commit Details or Comparison View.
+*   A Code Review can be performed on any single commit, or between any two commits (but not on Uncommitted Changes).
+*   Use the **"Mark as Reviewed"** / **"Mark as Not Reviewed"** actions on the file context menu to track your progress as you go.
+*   Commands are available to **End All Code Reviews in Workspace**, **End a specific Code Review in Workspace...**, and **Resume a specific Code Review in Workspace...** — so you can pause a review and pick it up again later without losing your progress.
+
+### 2. Gerrit Code Review Integration
+
+For repositories hosted on [Gerrit](https://www.gerritcodereview.com/), the extension integrates the review workflow directly into the graph:
+
+*   **Change badges on commits**: commits that belong to a Gerrit change display a badge with the change number, and optionally the **Code-Review (CR)** and **Verified (V)** score labels, so you can see the review state of a change at a glance.
+*   **Review event timeline**: the review history of each change (patchsets, votes, status transitions) is anchored to its commits in the graph. Clicking an event row expands the full verbatim NoteDb record — patchset, commit hash, labels, status and submit footers — in a monospace block.
+*   **Change dialog**: click a change badge to open a dialog showing the change owner and the complete event timeline.
+*   **Submit for Review**: a toolbar button pushes HEAD to `refs/for/<branch>` in one click. It performs safety checks (e.g. HEAD must not already be pushed to a remote), and an **Amend Change-Id** action generates and amends a Gerrit-shaped Change-Id onto HEAD when it is missing.
+*   **Change fetching**: Gerrit change refs (`refs/changes/*`) are fetched in the background. You can choose to fetch only the latest patchset of each change or all patchsets, cache all open changes or just the latest N, and optionally auto-fetch periodically.
+*   **Status filtering**: toolbar chips let you toggle which change statuses are shown — awaiting review (NEW), merged, abandoned, and work-in-progress (WIP).
+
+The Gerrit integration is controlled by the `review-graph.gerrit.*` settings (enabled by default), including:
+
+| Setting | Description |
+| --- | --- |
+| `review-graph.gerrit.enabled` | Enable/disable the Gerrit integration (change refs, review progress badges, submitting commits for review). |
+| `review-graph.gerrit.remote` | The remote used for Gerrit change refs (default `origin`). |
+| `review-graph.gerrit.fetchMode` | Fetch changes: `off`, `latest` (only the latest N changes) or `all` (all open changes). |
+| `review-graph.gerrit.fetchLimit` | How many latest changes to fetch and keep locally in `latest` mode (1–10000, default 20). |
+| `review-graph.gerrit.patchsets` | Fetch only the `latest` patchset of each change, or `all` patchsets. |
+| `review-graph.gerrit.autoFetch` | Periodically fetch Gerrit changes automatically. |
+| `review-graph.gerrit.showChangeRefs` | Show Gerrit change badges on commits. |
+| `review-graph.gerrit.includeChangeCommits` | Include Gerrit change commits in the graph. |
+| `review-graph.gerrit.showReviewProgress` | Show Code-Review / Verified score labels on change badges. |
+| `review-graph.gerrit.showMetaCommits` | Show the review event timeline anchored to change commits (`collapsed`, `expanded` or `off`). |
+| `review-graph.gerrit.statusFilter` | Which change statuses are shown in the graph (also toggleable from the toolbar). |
+| `review-graph.gerrit.showPushButton` | Show the "Submit for Review" toolbar button. |
+
 ## Extension Settings
 
 For a detailed list of all available settings, please refer to the [Extension Settings documentation](https://github.com/git-hub-tig/vscode-git-graph/wiki/Extension-Settings).

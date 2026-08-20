@@ -236,9 +236,22 @@ class GitGraphView {
 			this.loadViewTo = null;
 		}
 
+		let filterChanged = false;
+		if (loadViewTo !== null && loadViewTo.repo === newRepo && typeof loadViewTo.filterPath === 'string') {
+			// Apply the file path filter the view was requested to be loaded with
+			const newFilter = loadViewTo.filterPath !== '' ? loadViewTo.filterPath : null;
+			filterChanged = newFilter !== this.commitPathFilter;
+			this.commitPathFilter = newFilter;
+			this.renderFilterButton();
+		}
+
 		if (this.currentRepo !== newRepo) {
 			this.loadRepo(newRepo);
 			return true;
+		} else if (filterChanged) {
+			// The repository is already loaded, but the path filter changed: reload the commits
+			this.refresh(false);
+			return false;
 		} else {
 			this.finaliseRepoLoad(false);
 			return false;
@@ -3868,7 +3881,7 @@ window.addEventListener('load', () => {
 		} catch (error) {
 			// Isolate handler errors so that a malformed message cannot break the handling of
 			// subsequent messages
-			dialog.showError('Gerrit Graph', 'An unexpected error occurred while handling a message from the extension: ' + error, null, null);
+			dialog.showError('Review Graph', 'An unexpected error occurred while handling a message from the extension: ' + error, null, null);
 		}
 	});
 

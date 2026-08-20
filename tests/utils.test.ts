@@ -945,7 +945,7 @@ describe('openExtensionSettings', () => {
 		const result = await openExtensionSettings();
 
 		// Assert
-		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.openSettings', '@ext:neophack.gerrit-graph');
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.openSettings', '@ext:aucneon.review-graph');
 		expect(result).toBe(null);
 	});
 
@@ -1620,7 +1620,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable:/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledTimes(0);
 		expect(terminal.show).toHaveBeenCalled();
@@ -1636,7 +1636,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable:/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
 		expect(terminal.show).toHaveBeenCalled();
@@ -1655,7 +1655,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
 		expect(terminal.show).toHaveBeenCalled();
@@ -1674,7 +1674,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable:/path/to/git'
 			},
-			name: 'Gerrit Graph: Name',
+			name: 'Review Graph: Name',
 			shellPath: '/path/to/shell'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
@@ -1694,7 +1694,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable;/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
 		expect(terminal.show).toHaveBeenCalled();
@@ -1713,7 +1713,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable;/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
 		expect(terminal.show).toHaveBeenCalled();
@@ -1732,7 +1732,7 @@ describe('openGitTerminal', () => {
 			env: {
 				PATH: '/path/to/executable;/path/to/git'
 			},
-			name: 'Gerrit Graph: Name'
+			name: 'Review Graph: Name'
 		});
 		expect(terminal.sendText).toHaveBeenCalledWith('git rebase');
 		expect(terminal.show).toHaveBeenCalled();
@@ -2497,5 +2497,5 @@ describe('constructIncompatibleGitVersionMessage', () => {
 });
 
 function expectedValueGitGraphUri(filePath: string, commit: string, repo: string, exists: boolean) {
-	return 'gerrit-graph://' + encodeURI(filePath) + (!exists ? ' (non-existent)' : '') + '?' + Buffer.from(JSON.stringify({ filePath: filePath, commit: commit, repo: repo, exists: exists })).toString('base64');
+	return 'review-graph://' + encodeURI(filePath) + (!exists ? ' (non-existent)' : '') + '?' + Buffer.from(JSON.stringify({ filePath: filePath, commit: commit, repo: repo, exists: exists })).toString('base64');
 }

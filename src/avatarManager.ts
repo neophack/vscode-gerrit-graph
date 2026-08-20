@@ -229,7 +229,7 @@ export class AvatarManager extends Disposable {
 
 		https.get({
 			hostname: 'api.github.com', path: '/repos/' + owner + '/' + repo + '/commits/' + avatarRequest.commits[commitIndex],
-			headers: { 'User-Agent': 'gerrit-graph' },
+			headers: { 'User-Agent': 'review-graph' },
 			agent: false, timeout: 15000
 		}, (res) => {
 			let respBody = '';
@@ -305,7 +305,7 @@ export class AvatarManager extends Disposable {
 
 		// A Personal Access Token is optional: unauthenticated requests use a lower rate limit,
 		// but no credentials are shipped with the extension
-		const headers: { [header: string]: string } = { 'User-Agent': 'gerrit-graph' };
+		const headers: { [header: string]: string } = { 'User-Agent': 'review-graph' };
 		const gitlabToken = getConfig().gitlabToken;
 		if (gitlabToken !== '') {
 			headers['Private-Token'] = gitlabToken;
@@ -400,7 +400,7 @@ export class AvatarManager extends Disposable {
 
 			https.get({
 				hostname: imgUrl.hostname, path: imgUrl.pathname + imgUrl.search,
-				headers: { 'User-Agent': 'gerrit-graph' },
+				headers: { 'User-Agent': 'review-graph' },
 				agent: false, timeout: 15000
 			}, (res) => {
 				let imageBufferArray: Buffer[] = [];
