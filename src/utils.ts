@@ -343,7 +343,7 @@ export function createPullRequest(config: PullRequestConfig, sourceOwner: string
  * @returns A promise resolving to the ErrorInfo of the executed command.
  */
 export function openExtensionSettings(): Thenable<ErrorInfo> {
-	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:Gxl.git-graph-3').then(
+	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:Gxl.gerrit-graph').then(
 		() => null,
 		() => 'Visual Studio Code was unable to open the Git Graph Extension Settings.'
 	);
@@ -843,28 +843,3 @@ export function constructIncompatibleGitVersionMessage(executable: GitExecutable
 	return 'A newer version of Git (>= ' + version + ') is required for ' + (feature ? feature : 'this feature') + '. Git ' + executable.version + ' is currently installed. Please install a newer version of Git to use this feature.';
 }
 
-export function isAdRegion(): boolean {
-	const lang = vscode.env.language.toLowerCase();
-	if (lang.startsWith('zh') || lang.startsWith('ru') || lang.startsWith('be')) {
-		return true;
-	}
-	try {
-		const tz = new Intl.DateTimeFormat().resolvedOptions().timeZone.toLowerCase();
-		const adTimeZones = [
-			'asia/shanghai', 'asia/chongqing', 'asia/urumqi', 'asia/hong_kong',
-			'europe/moscow', 'europe/minsk', 'asia/yekaterinburg', 'asia/omsk',
-			'asia/novosibirsk', 'asia/krasnoyarsk', 'asia/irkutsk', 'asia/yakutsk',
-			'asia/vladivostok', 'asia/magadan', 'asia/kamchatka', 'europe/kaliningrad',
-			'europe/samara', 'europe/volgograd', 'asia/srednekolymsk', 'asia/anadyr',
-			'asia/barnaul', 'asia/tomsk', 'asia/novokuznetsk', 'europe/astrakhan',
-			'europe/kirov', 'europe/saratov', 'europe/ulyanovsk', 'asia/chita',
-			'asia/khandyga', 'asia/ust-nera', 'asia/macau', 'asia/taipei'
-		];
-		if (adTimeZones.includes(tz)) {
-			return true;
-		}
-	} catch (e) {
-		// Ignore
-	}
-	return false;
-}

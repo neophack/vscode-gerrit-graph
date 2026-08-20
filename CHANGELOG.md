@@ -1,6 +1,37 @@
 # Change Log
 
-**Sponsor:** LogiCar VPN - "Freedom for goal of living a well-reasoned life". Break through the block in countries or regions like China mainland, Hong Kong, Russia, and Belarus with state-of-the-art encryption. Not only access Google/Gemini, but also AI models like ChatGPT and Claude AI. Visit [http://gcosaka.minzhi.online/](http://gcosaka.minzhi.online/). Welcome 3rd party ads to support long standing maintenance of this open source project!
+## [1.37.32] - 2026-08-20
+* Add a "Gerrit Code Review > Change Refs Cache" setting to the Git Graph View's Repository Settings: choose between caching **all** open Gerrit change refs (`refs/remotes/<remote>/changes/*`) or only the **latest N changes** (1..10000). The choice is saved to the global User Settings (`gerrit-graph.gerrit.fetchMode` / `gerrit-graph.gerrit.fetchLimit`), the Gerrit cache is invalidated immediately, and the view reloads and re-fetches (pruning surplus local change refs) so the new cache size takes effect right away.
+
+## [1.37.31] - 2026-08-19
+* Make every event row of the Gerrit review dialog expandable: clicking an event shows the full verbatim NoteDb record of that event (patchset, commit hash, labels, status and submit footers) in a monospace block below the row, with a rotating chevron indicating the toggle. Events persisted by older versions (without the full record) render as before and are not clickable.
+* Add an "Amend Change-Id" action to the Gerrit controls row: generates a Gerrit-shaped Change-Id and amends it onto HEAD in one click (only when HEAD has no Change-Id yet and hasn't been pushed to any remote; reports the existing Change-Id otherwise). The Submit-for-Review flow now shares the same safety checks.
+
+## [1.37.30] - 2026-08-19
+* Fix the commit graph changing when the "Merged" status chip is toggled: merged changes' patchset refs are no longer injected into the commit log, because their content is already part of the target branch's history (submitted, possibly re-hashed by a cherry-pick/rebase submit strategy). Previously these (often dangling) patchset commits appeared as extra floating chains at the top of the graph and pushed real branch commits out of the loaded commits window. Toggling the chip now only affects the review info (badges/labels) shown on commits, never the commits in the graph.
+* Increase the default of the `gerrit-graph.gerrit.fetchLimit` setting from 10 to 20, so the 20 most recent Gerrit change refs are fetched and displayed in 'latest' fetch mode (users who set the setting explicitly are unaffected).
+* Add a real-Git integration test suite (`tests/gerritIntegration.test.ts`) that builds simulated Gerrit repositories in a temp directory (bare "server" with `refs/changes/*` + NoteDb meta refs; merge-submit, cherry-pick-submit, open/abandoned/WIP changes, no-Gerrit and empty repositories) and verifies the full pipeline: ls-remote discovery, targeted fetch, meta parsing, status-filtered ref injection, the graph-stability guarantee of the fix above, the loaded-commits window, meta-commit leak prevention, pruning and clearing of local change refs.
+* Add a full Gerrit status-filter × configuration matrix to the GitGraphView tests (chip combinations, `includeChangeCommits`, `patchsets: all`, integration disabled, `fetchMode: off`, configured default filter, fetch failure degradation and cache fallback) and extend the Gerrit unit tests with NoteDb edge cases (pushed/cherry-picked submit strategies, restored/WIP/ready transitions, vote magnitude, patchset header precedence, head-hash fallback, hex-only commit footers).
+
+## [1.37.29] - 2026-08-19
+* Replace the Gerrit meta event chip's box-drawing text (`├─┼─ +2/+1`) with a single compact chevron toggle button: no more tab-drawing characters or review score numbers next to the change badge (scores remain visible on the CR/V labels and in the expanded event rows).
+
+## [1.37.28] - 2026-08-19
+* Rename the extension's entire Visual Studio Code namespace from `git-graph` to `gerrit-graph` (command IDs, configuration setting keys, diff view URI scheme, webview type, context keys, and the per-repository config file, now `.vscode/gerrit-graph.json`), so Gerrit Graph and the original Git Graph extension can be installed and used side by side without conflicts. Both extensions' SCM title-bar buttons now appear together, each with its own icon.
+* Note: settings previously configured for this extension under `git-graph.*` must be re-applied under `gerrit-graph.*`, and per-repository config files must be renamed from `.vscode/vscode-git-graph.json` to `.vscode/gerrit-graph.json`.
+* Fix the "View Gerrit Graph" SCM button and Diff Views breaking when the original Git Graph extension is installed at the same time (caused by duplicate `git-graph.*` command IDs and URI scheme).
+* Repair the GitGraphView test suite (dead since the Gerrit integration commit) and align all tests with the Gerrit Graph behaviour and naming.
+
+## [1.37.27] - 2026-08-19
+* Always show the review actor in Gerrit meta event rows: the reviewer column no longer collapses to zero width when space is tight (it truncates with an ellipsis at a 4em floor instead), and the date column floor is right-sized (8.5em) to save space.
+* Show the change owner (author of the "Create change" event) in the Gerrit change dialog header.
+
+## [1.37.26] - 2026-08-19
+* Align the time and reviewer columns of Gerrit review event meta rows (both in the commit table and the change dialog timeline): event text fills the left and ellipsizes when long, reviewer names are right-aligned, and dates get a fixed-width right-aligned column with tabular numerals.
+
+## [1.37.25] - 2026-08-19
+* Redesign extension icon and Gerrit command/webview icons: combine the Git Graph branch visualization with a Gerrit review badge (orange, white ring and checkmark) on the tip commit; dark/light theme icon variants keep the badge monochrome to match their grayscale palettes.
+* Fix white ring of the Gerrit badge in SVG icons not rendering due to CSS presentation-attribute precedence.
 
 ## [1.37.15] - 2026-06-21
 * Fix extension activation failure caused by duplicated command registrations, ensuring Diff Views function correctly.
@@ -51,10 +82,9 @@
 * Fix avatar and diff extension logic.
 
 ## [1.36.2]
-* Update LogiCar VPN sponsor information to highlight state-of-the-art encryption, ability to bypass blocks in specific regions, and support for accessing AI models.
+* Remove the third-party sponsor content.
 
 ## [1.36.1]
-* Add LogiCar VPN sponsor ad to first install, README, and the Git Graph view to support open source maintenance.
 * Add 'Compare with...' context menu action for branches.
 * Add configurable font size and row height for the commit table.
 * Add `git-graph.repository.commits.showCommitBodyInline` setting to optionally hide commit body in graph (defaults to true).

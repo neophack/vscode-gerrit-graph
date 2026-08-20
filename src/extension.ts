@@ -5,7 +5,6 @@ import { getConfig } from './config';
 import { DataSource } from './dataSource';
 import { DiffDocProvider } from './diffDocProvider';
 import { ExtensionState } from './extensionState';
-import { onStartUp } from './life-cycle/startup';
 import { Logger } from './logger';
 import { RepoManager } from './repoManager';
 import { StatusBarItem } from './statusBarItem';
@@ -49,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(DiffDocProvider.scheme, diffDocProvider),
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration('git-graph')) {
+			if (event.affectsConfiguration('gerrit-graph')) {
 				configurationEmitter.emit(event);
 			} else if (event.affectsConfiguration('git.path')) {
 				const paths = getConfig().gitPaths;
@@ -82,7 +81,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	logger.log('Started Git Graph - Ready to use!');
 
 	extensionState.expireOldCodeReviews();
-	onStartUp(context).catch(() => { });
 }
 
 /**

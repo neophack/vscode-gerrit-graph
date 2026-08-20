@@ -10,6 +10,9 @@
 // ECDSA key fingerprint is SHA256:7ZIubzLSVVGGQ2BgrPF+QnkDYjuJ/xs754ZS8oAZ7QY.
 // This key is not known by any other names.
 // Are you sure you want to continue connecting (yes/no/[fingerprint])?
+
+const GERRIT_EVENT_ICONS: { [type: string]: string } = { 'created': '\u270E', 'patchset': '\u25CB', 'vote': '\u2713', 'merged': '\u23F9', 'abandoned': '\u2298', 'restored': '\u21BA', 'wip': '\u23F8', 'ready': '\u25B6', 'comment': '\u2022' };
+
 class GitGraphView {
 	private gitRepos: GG.GitRepoSet;
 	private gitBranches: ReadonlyArray<string> = [];
@@ -25,7 +28,6 @@ class GitGraphView {
 	private avatars: AvatarImageCollection = {};
 	private currentBranches: string[] | null = null;
 	private currentAuthors: string[] | null = null;
-	private currentTags: string[] | null = null;
 
 	private currentRepo!: string;
 	private currentRepoLoading: boolean = true;
@@ -36,6 +38,7 @@ class GitGraphView {
 		loadCommitsRefreshId: number;
 		repoInfoChanges: boolean;
 		configChanges: boolean;
+		forceGerritRefresh: boolean;
 		requestingRepoInfo: boolean;
 		requestingConfig: boolean;
 	};
@@ -49,6 +52,11 @@ class GitGraphView {
 	private maxCommits: number;
 	private scrollTop = 0;
 	private renderedGitBranchHead: string | null = null;
+	private gerritStates: { [hash: string]: GG.GerritChangeState } = {};
+	private gerritStatusFilter: GG.GerritStatusFilter | null = null;
+	private gerritShowRefs: boolean | null = null;
+	private gerritStatesDirty: boolean = false;
+	private gerritExpandedChanges: { [repo: string]: { [change: number]: boolean } } = {}; // session memory only (not persisted)
 
 	private lastScrollToStash: {
 		time: number,
@@ -60,10 +68,10 @@ class GitGraphView {
 	private readonly repoDropdown: Dropdown;
 	private readonly branchDropdown: Dropdown;
 	private readonly authorDropdown: Dropdown;
-	private readonly tagDropdown: Dropdown;
 
 	private readonly viewElem: HTMLElement;
 	private readonly controlsElem: HTMLElement;
+	private readonly gerritControlsElem: HTMLElement | null;
 	private readonly tableElem: HTMLElement;
 	private tableColHeadersElem: HTMLElement | null;
 	private readonly footerElem: HTMLElement;
@@ -82,11 +90,13 @@ class GitGraphView {
 			loadCommitsRefreshId: initialState.loadCommitsRefreshId,
 			repoInfoChanges: false,
 			configChanges: false,
+			forceGerritRefresh: false,
 			requestingRepoInfo: false,
 			requestingConfig: false
 		};
 
 		this.controlsElem = document.getElementById('controls')!;
+		this.gerritControlsElem = document.getElementById('gerritControls')!;
 		this.tableElem = document.getElementById('commitTable')!;
 		this.tableColHeadersElem = document.getElementById('tableColHeaders')!;
 		this.footerElem = document.getElementById('footer')!;
@@ -113,13 +123,6 @@ class GitGraphView {
 			this.clearCommits();
 			this.requestLoadRepoInfoAndCommits(true, true);
 		});
-		this.tagDropdown = new Dropdown('tagDropdown', false, true, 'Tags', (values) => {
-			this.currentTags = values;
-			this.maxCommits = this.config.initialLoadCommits;
-			this.saveState();
-			this.clearCommits();
-			this.requestLoadRepoInfoAndCommits(true, true);
-		});
 		this.showRemoteBranchesElem = <HTMLInputElement>document.getElementById('showRemoteBranchesCheckbox')!;
 		this.showRemoteBranchesElem.addEventListener('change', () => {
 			this.saveRepoStateValue(this.currentRepo, 'showRemoteBranchesV2', this.showRemoteBranchesElem.checked ? GG.BooleanOverride.Enabled : GG.BooleanOverride.Disabled);
@@ -129,22 +132,20 @@ class GitGraphView {
 		this.refreshBtnElem = document.getElementById('refreshBtn')!;
 		this.refreshBtnElem.addEventListener('click', () => {
 			if (!this.refreshBtnElem.classList.contains(CLASS_REFRESHING)) {
-				this.refresh(true, true);
+				this.refresh(true, true, true);
 			}
 		});
 		this.renderRefreshButton();
+		if (prevState) {
+			// Restore the Gerrit controls state before they are initialised, so that the chip selections
+			// survive the Webview being reloaded (e.g. switching away from the panel and back)
+			if (prevState.gerritStatusFilter !== null && prevState.gerritStatusFilter !== undefined) this.gerritStatusFilter = prevState.gerritStatusFilter;
+			if (prevState.gerritShowRefs !== null && prevState.gerritShowRefs !== undefined) this.gerritShowRefs = prevState.gerritShowRefs;
+		}
+		this.initGerritControls();
 
 		this.findWidget = new FindWidget(this);
 		this.settingsWidget = new SettingsWidget(this);
-
-		const logicarCloseBtn = document.getElementById('logicar-close-btn');
-		if (logicarCloseBtn) {
-			logicarCloseBtn.addEventListener('click', () => {
-				updateGlobalViewState('hideLogiCarAd', true);
-				const banner = document.getElementById('logicar-ad-banner');
-				if (banner) banner.remove();
-			});
-		}
 
 		alterClass(document.body, CLASS_BRANCH_LABELS_ALIGNED_TO_GRAPH, this.config.referenceLabels.branchLabelsAlignedToGraph);
 		alterClass(document.body, CLASS_TAG_LABELS_RIGHT_ALIGNED, this.config.referenceLabels.tagLabelsOnRight);
@@ -162,11 +163,11 @@ class GitGraphView {
 			this.currentRepo = prevState.currentRepo;
 			this.currentBranches = prevState.currentBranches;
 			this.currentAuthors = prevState.currentAuthors;
-			this.currentTags = prevState.currentTags;
 			this.maxCommits = prevState.maxCommits;
 			this.expandedCommit = prevState.expandedCommit;
 			this.avatars = prevState.avatars;
 			this.gitConfig = prevState.gitConfig;
+			if (prevState.gerritStates !== undefined) this.gerritStates = prevState.gerritStates; // restore the Gerrit badges together with the commits
 			this.loadRepoInfo(prevState.gitBranches, prevState.gitBranchHead, prevState.gitRemotes, prevState.gitStashes, true);
 			this.loadCommits(prevState.commits, prevState.commitHead, prevState.gitTags, prevState.moreCommitsAvailable, prevState.onlyFollowFirstParent);
 			this.findWidget.restoreState(prevState.findWidget);
@@ -263,7 +264,6 @@ class GitGraphView {
 		this.gitTags = [];
 		this.currentBranches = null;
 		this.currentAuthors = null;
-		this.currentTags = null;
 		this.renderFetchButton();
 		this.closeCommitDetails(false);
 		this.settingsWidget.close();
@@ -327,14 +327,10 @@ class GitGraphView {
 		if (this.currentAuthors === null || this.currentAuthors.length === 0) {
 			this.currentAuthors = [SHOW_ALL_BRANCHES];
 		}
-		if (this.currentTags === null || this.currentTags.length === 0) {
-			this.currentTags = [SHOW_ALL_BRANCHES];
-		}
 
 		// Set up branch dropdown options
 		this.branchDropdown.setOptions(this.getBranchOptions(true), this.currentBranches);
 		this.authorDropdown.setOptions(this.getAuthorOptions(), this.currentAuthors);
-		this.tagDropdown.setOptions(this.getTagOptions(), this.currentTags);
 
 		// Remove hidden remotes that no longer exist
 		let hiddenRemotes = this.gitRepos[this.currentRepo].hideRemotes;
@@ -367,16 +363,6 @@ class GitGraphView {
 		// This list of tags is just used to provide additional information in the dialogs. Tag information included in commits is used for all other purposes (e.g. rendering, context menus)
 		const tagsChanged = !arraysStrictlyEqual(this.gitTags, tags);
 		this.gitTags = tags;
-		if (tagsChanged) {
-			if (this.currentTags !== null && !(this.currentTags.length === 1 && this.currentTags[0] === SHOW_ALL_BRANCHES)) {
-				// Filter any tags that are currently selected, but no longer exist
-				this.currentTags = this.currentTags.filter((tag) => this.gitTags.includes(tag));
-			}
-			if (this.currentTags === null || this.currentTags.length === 0) {
-				this.currentTags = [SHOW_ALL_BRANCHES];
-			}
-			this.tagDropdown.setOptions(this.getTagOptions(), this.currentTags);
-		}
 
 		if (!this.currentRepoLoading && !this.currentRepoRefreshState.hard && this.moreCommitsAvailable === moreAvailable && this.onlyFollowFirstParent === onlyFollowFirstParent && this.commitHead === commitHead && commits.length > 0 && arraysEqual(this.commits, commits, (a, b) =>
 			a.hash === b.hash &&
@@ -385,7 +371,7 @@ class GitGraphView {
 			arraysEqual(a.remotes, b.remotes, (a: GG.GitCommitRemote, b: GG.GitCommitRemote) => a.name === b.name && a.remote === b.remote) &&
 			arraysStrictlyEqual(a.parents, b.parents) &&
 			((a.stash === null && b.stash === null) || (a.stash !== null && b.stash !== null && a.stash.selector === b.stash.selector))
-		) && this.renderedGitBranchHead === this.gitBranchHead) {
+		) && this.renderedGitBranchHead === this.gitBranchHead && !this.gerritStatesDirty) {
 
 			if (this.commits[0].hash === UNCOMMITTED) {
 				this.commits[0] = commits[0];
@@ -412,6 +398,7 @@ class GitGraphView {
 		}
 
 		const currentRepoLoading = this.currentRepoLoading;
+		this.gerritStatesDirty = false;
 		this.currentRepoLoading = false;
 		this.moreCommitsAvailable = moreAvailable;
 		this.onlyFollowFirstParent = onlyFollowFirstParent;
@@ -565,6 +552,13 @@ class GitGraphView {
 		if (msg.error === null) {
 			const refreshState = this.currentRepoRefreshState;
 			if (refreshState.inProgress && refreshState.loadCommitsRefreshId === msg.refreshId) {
+				// Update the Gerrit change states (badges/timelines); force a re-render if they changed
+				const newStates: { [hash: string]: GG.GerritChangeState } = {};
+				if (msg.gerritStates !== null) {
+					for (const state of msg.gerritStates) newStates[state.headHash] = state;
+				}
+				this.gerritStatesDirty = JSON.stringify(this.gerritStates) !== JSON.stringify(newStates);
+				this.gerritStates = newStates;
 				this.loadCommits(msg.commits, msg.head, msg.tags, msg.moreCommitsAvailable, msg.onlyFollowFirstParent);
 			}
 		} else {
@@ -640,14 +634,6 @@ class GitGraphView {
 		}
 		return options;
 	}
-	public getTagOptions(): ReadonlyArray<DialogSelectInputOption> {
-		const options: DialogSelectInputOption[] = [];
-		options.push({ name: 'All', value: SHOW_ALL_BRANCHES });
-		for (let i = 0; i < this.gitTags.length; i++) {
-			options.push({ name: this.gitTags[i], value: this.gitTags[i] });
-		}
-		return options;
-	}
 	public getCommitId(hash: string) {
 		return typeof this.commitLookup[hash] === 'number' ? this.commitLookup[hash] : null;
 	}
@@ -677,6 +663,10 @@ class GitGraphView {
 		return this.gitConfig;
 	}
 
+	public getGerritConfig(): Readonly<GG.GerritConfig> {
+		return this.config.gerrit;
+	}
+
 	public getRepoState(repo: string): Readonly<GG.GitRepoState> | null {
 		return typeof this.gitRepos[repo] !== 'undefined'
 			? this.gitRepos[repo]
@@ -690,11 +680,11 @@ class GitGraphView {
 
 	/* Refresh */
 
-	public refresh(hard: boolean, configChanges: boolean = false) {
+	public refresh(hard: boolean, configChanges: boolean = false, forceGerritRefresh: boolean = false) {
 		if (hard) {
 			this.clearCommits();
 		}
-		this.requestLoadRepoInfoAndCommits(hard, false, configChanges);
+		this.requestLoadRepoInfoAndCommits(hard, false, configChanges, forceGerritRefresh);
 	}
 
 
@@ -720,7 +710,6 @@ class GitGraphView {
 			refreshId: ++this.currentRepoRefreshState.loadCommitsRefreshId,
 			branches: this.currentBranches === null || (this.currentBranches.length === 1 && this.currentBranches[0] === SHOW_ALL_BRANCHES) ? null : this.currentBranches,
 			authors: this.currentAuthors === null || (this.currentAuthors.length === 1 && this.currentAuthors[0] === SHOW_ALL_BRANCHES) ? null : this.currentAuthors,
-			tags: this.currentTags === null || (this.currentTags.length === 1 && this.currentTags[0] === SHOW_ALL_BRANCHES) ? null : this.currentTags,
 			maxCommits: this.maxCommits,
 			showTags: getShowTags(repoState.showTags),
 			showRemoteBranches: getShowRemoteBranches(repoState.showRemoteBranchesV2),
@@ -729,15 +718,19 @@ class GitGraphView {
 			commitOrdering: getCommitOrdering(repoState.commitOrdering),
 			remotes: this.gitRemotes,
 			hideRemotes: repoState.hideRemotes,
-			stashes: this.gitStashes
+			stashes: this.gitStashes,
+			gerritStatusFilter: this.gerritStatusFilter,
+			gerritForceRefresh: this.currentRepoRefreshState.forceGerritRefresh
 		});
+		this.currentRepoRefreshState.forceGerritRefresh = false;
 	}
 
-	private requestLoadRepoInfoAndCommits(hard: boolean, skipRepoInfo: boolean, configChanges: boolean = false) {
+	private requestLoadRepoInfoAndCommits(hard: boolean, skipRepoInfo: boolean, configChanges: boolean = false, forceGerritRefresh: boolean = false) {
 		const refreshState = this.currentRepoRefreshState;
 		if (refreshState.inProgress) {
 			refreshState.hard = refreshState.hard || hard;
 			refreshState.configChanges = refreshState.configChanges || configChanges;
+			refreshState.forceGerritRefresh = refreshState.forceGerritRefresh || forceGerritRefresh;
 			if (!skipRepoInfo) {
 				// This request will trigger a loadCommit request after the loadRepoInfo request has completed.
 				// Invalidate any previous commit requests in progress.
@@ -748,6 +741,7 @@ class GitGraphView {
 			refreshState.inProgress = true;
 			refreshState.repoInfoChanges = false;
 			refreshState.configChanges = configChanges;
+			refreshState.forceGerritRefresh = forceGerritRefresh;
 			refreshState.requestingRepoInfo = false;
 		}
 
@@ -835,14 +829,16 @@ class GitGraphView {
 			avatars: this.avatars,
 			currentBranches: this.currentBranches,
 			currentAuthors: this.currentAuthors,
-			currentTags: this.currentTags,
 			moreCommitsAvailable: this.moreCommitsAvailable,
 			maxCommits: this.maxCommits,
 			onlyFollowFirstParent: this.onlyFollowFirstParent,
 			expandedCommit: expandedCommit,
 			scrollTop: this.scrollTop,
 			findWidget: this.findWidget.getState(),
-			settingsWidget: this.settingsWidget.getState()
+			settingsWidget: this.settingsWidget.getState(),
+			gerritStatusFilter: this.gerritStatusFilter,
+			gerritShowRefs: this.gerritShowRefs,
+			gerritStates: this.gerritStates
 		});
 	}
 
@@ -908,16 +904,32 @@ class GitGraphView {
 		const expandedCommit = this.isCdvDocked() ? null : this.expandedCommit;
 		const expandedCommitElem = expandedCommit !== null ? document.getElementById('cdv') : null;
 
+		// Measure the Gerrit meta event rows that are expanded beneath their change's commit,
+		// so that the graph can insert the same extra height at those commit rows (keeping the lanes aligned)
+		const metaExpansions: { index: number, height: number }[] = [];
+		const metaHeights = new Map<number, number>();
+		for (const elem of Array.from(this.tableElem.querySelectorAll('tr.gg-meta-row'))) {
+			const change = parseInt((<HTMLElement>elem).dataset.change!);
+			metaHeights.set(change, (metaHeights.get(change) || 0) + (<HTMLElement>elem).offsetHeight);
+		}
+		let metaRowsHeight = 0;
+		metaHeights.forEach((height: number, change: number) => {
+			metaRowsHeight += height;
+			const hash = Object.keys(this.gerritStates).find((h) => this.gerritStates[h].change === change);
+			const index = hash !== undefined ? this.commitLookup[hash] : undefined;
+			if (index !== undefined) metaExpansions.push({ index: index, height: height });
+		});
+
 		// Update the graphs grid dimensions
 		this.config.graph.grid.expandY = expandedCommitElem !== null
 			? expandedCommitElem.getBoundingClientRect().height
 			: cdvHeight;
 		this.config.graph.grid.y = this.commits.length > 0 && this.tableElem.children.length > 0
-			? (this.tableElem.children[0].clientHeight - headerHeight - (expandedCommit !== null ? cdvHeight : 0)) / this.commits.length
+			? (this.tableElem.children[0].clientHeight - headerHeight - (expandedCommit !== null ? cdvHeight : 0) - metaRowsHeight) / this.commits.length
 			: this.config.graph.grid.y;
 		this.config.graph.grid.offsetY = headerHeight + this.config.graph.grid.y / 2;
 
-		this.graph.render(expandedCommit);
+		this.graph.render(expandedCommit, metaExpansions);
 	}
 
 	private renderTable() {
@@ -999,6 +1011,12 @@ class GitGraphView {
 				refTags += refHtml;
 			}
 
+			let refGerrit = '';
+			const gerritState = this.gerritStates[commit.hash];
+			if (this.config.gerrit.enabled && this.gerritShowRefs && typeof gerritState !== 'undefined') {
+				refGerrit = this.getGerritBadgeHtml(gerritState);
+			}
+
 			if (commit.stash !== null) {
 				refName = escapeHtml(commit.stash.selector);
 				refBranches = '<span class="gitRef stash" data-name="' + refName + '">' + SVG_ICONS.stash + '<span class="gitRefName" data-fullref="' + refName + '">' + escapeHtml(commit.stash.selector.substring(5)) + '</span></span>' + refBranches;
@@ -1012,13 +1030,16 @@ class GitGraphView {
 				: '';
 
 			html += '<tr class="commit' + (commit.hash === currentHash ? ' current' : '') + (mutedCommits[i] ? ' mute' : '') + '"' + (commit.hash !== UNCOMMITTED ? '' : ' id="uncommittedChanges"') + ' data-id="' + i + '" data-color="' + vertexColours[i] + '">' +
-				(this.config.referenceLabels.branchLabelsAlignedToGraph ? '<td>' + getResizeColHtml(0) + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot : '<td>' + getResizeColHtml(0) + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot + refBranches) + (this.config.referenceLabels.tagLabelsOnRight ? message + (refTags !== '' ? '<span class="tagsWrapper">' + refTags + '</span>' : '') : refTags + message) + '</span></td>' +
+				(this.config.referenceLabels.branchLabelsAlignedToGraph ? '<td>' + getResizeColHtml(0) + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot : '<td>' + getResizeColHtml(0) + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot + refBranches) + (this.config.referenceLabels.tagLabelsOnRight ? refGerrit + message + (refTags !== '' ? '<span class="tagsWrapper">' + refTags + '</span>' : '') : refTags + refGerrit + message) + '</span></td>' +
 				(colVisibility.date ? '<td class="dateCol text" title="' + date.title + '">' + getResizeColHtml(2) + date.formatted + '</td>' : '') +
 				(colVisibility.author ? '<td class="authorCol text" title="' + escapeHtml(commit.author + ' <' + commit.email + '>') + '">' + getResizeColHtml(3) + (this.config.fetchAvatars ? '<span class="avatar" data-email="' + escapeHtml(commit.email) + '">' + (typeof this.avatars[commit.email] === 'string' ? '<img class="avatarImg" src="' + this.avatars[commit.email] + '">' : '') + '</span>' : '') + escapeHtml(commit.author) + '</td>' : '') +
 				(colVisibility.commit ? '<td class="text" title="' + escapeHtml(commit.hash) + '">' + getResizeColHtml(4) + abbrevCommit(commit.hash) + '</td>' : '') +
 				'</tr>';
 
-
+			// Gerrit meta event rows: anchored directly beneath the change's commit
+			if (refGerrit !== '' && gerritState !== undefined && this.config.gerrit.showMetaCommits !== 'off' && this.isGerritChangeExpanded(gerritState.change)) {
+				html += this.getGerritMetaRowsHtml(gerritState, colVisibility);
+			}
 		}
 		function getResizeColHtml(col: number) {
 			return (col > 0 ? '<span class="resizeCol left" data-col="' + (col - 1) + '"></span>' : '') + (col < 4 ? '<span class="resizeCol right" data-col="' + col + '"></span>' : '');
@@ -1075,6 +1096,192 @@ class GitGraphView {
 		if (this.config.stickyHeader) {
 			this.tableColHeadersElem = document.getElementById('tableColHeaders');
 			this.alignTableHeaderToControls();
+		}
+	}
+
+	private getGerritBadgeHtml(state: GG.GerritChangeState) {
+		const score = (value: number) => (value > 0 ? '+' : '') + value;
+		let progress = '';
+		if (this.config.gerrit.showReviewProgress) {
+			progress = '<span class="gg-label cr' + state.codeReview + '">CR' + score(state.codeReview) + '</span>';
+			if (state.verified !== 0) progress += '<span class="gg-label v' + state.verified + '">V' + score(state.verified) + '</span>';
+		}
+		let status = '';
+		if (state.status === 'merged') status = '<span class="gg-status merged">\u2713 merged</span>';
+		else if (state.status === 'abandoned') status = '<span class="gg-status abandoned">\u2205 abandoned</span>';
+		else if (state.wip) status = '<span class="gg-status wip">WIP</span>';
+		const expanded = this.isGerritChangeExpanded(state.change);
+		const meta = this.config.gerrit.showMetaCommits !== 'off'
+			? '<span class="gg-meta-chip' + (expanded ? ' expanded' : '') + '" data-change="' + state.change + '" title="Gerrit review events (click to toggle)">' + SVG_ICONS.chevronDown + '</span>'
+			: '';
+		return '<span class="gitRef gerrit" data-name="#' + state.change + '/' + state.patchset + '" data-change="' + state.change + '" data-ps="' + state.patchset + '" data-hash="' + escapeHtml(state.headHash) + '" title="Gerrit Change #' + state.change + (state.url !== null ? ' - ' + escapeHtml(state.url) : '') + '">' + SVG_ICONS.review + '<span class="gitRefName" data-fullref="#' + state.change + '/' + state.patchset + '">#' + state.change + '/' + state.patchset + '</span>' + progress + status + '</span>' + meta;
+	}
+
+	private isGerritChangeExpanded(change: number) {
+		const expanded = this.gerritExpandedChanges[this.currentRepo];
+		if (expanded !== undefined && expanded[change] !== undefined) return expanded[change];
+		return this.config.gerrit.showMetaCommits === 'expanded';
+	}
+
+	private toggleGerritChangeExpanded(change: number) {
+		const newValue = !this.isGerritChangeExpanded(change);
+		if (this.gerritExpandedChanges[this.currentRepo] === undefined) this.gerritExpandedChanges[this.currentRepo] = {};
+		this.gerritExpandedChanges[this.currentRepo][change] = newValue;
+		return newValue;
+	}
+
+	/**
+	 * Generate the in-table meta event rows of a Gerrit change (anchored beneath its commit).
+	 */
+	private getGerritMetaRowsHtml(state: GG.GerritChangeState, colVisibility: { date: boolean; author: boolean; commit: boolean }) {
+		const events = state.events.slice().reverse(); // display oldest → newest
+		let html = '';
+		for (const event of events) {
+			const text = escapeHtml(event.raw) + (event.labels !== undefined ? ' (' + event.labels.map((label) => escapeHtml(label.name) + (label.value > 0 ? '+' : '') + label.value).join(', ') + ')' : '');
+			html += '<tr class="gg-meta-row" data-change="' + state.change + '" title="' + escapeHtml(event.raw) + '"><td></td><td>' +
+				'<div class="gg-meta-event">' +
+				'<span class="gg-meta-event-icon">' + (GERRIT_EVENT_ICONS[event.type] || '•') + '</span>' +
+				'<span class="gg-meta-event-text">' + text + '</span>' +
+				(event.reviewer !== undefined ? '<span class="gg-meta-event-reviewer">' + escapeHtml(event.reviewer) + '</span>' : '') +
+				'<span class="gg-meta-event-date">' + formatShortDate(event.timestamp).formatted + '</span>' +
+				'</div></td>' +
+				(colVisibility.date ? '<td></td>' : '') +
+				(colVisibility.author ? '<td></td>' : '') +
+				(colVisibility.commit ? '<td></td>' : '') +
+				'</tr>';
+		}
+		return html;
+	}
+
+	private showGerritReviewInfo(hash: string) {
+		const state = this.gerritStates[hash];
+		if (state === undefined) {
+			dialog.showError('Gerrit Review', 'No Gerrit review information is available for this commit. Only commits of changes that pass the status filter (and the latest fetched changes) have review information.', 'Close', null);
+			return;
+		}
+		this.showGerritDialog(state);
+	}
+
+	private showGerritDialog(state: GG.GerritChangeState) {
+		const score = (value: number) => (value > 0 ? '+' : '') + value;
+		const statusText = state.status === 'merged' ? 'Merged' : state.status === 'abandoned' ? 'Abandoned' : (state.wip ? 'Work in Progress' : 'Open (awaiting review)');
+		const icons = GERRIT_EVENT_ICONS;
+		// state.events is newest → oldest: the change author is the actor of the oldest "Create change" event
+		const createdEvent = state.events.slice().reverse().find((event) => event.type === 'created');
+		const owner = createdEvent !== undefined && createdEvent.reviewer !== undefined ? createdEvent.reviewer : null;
+		let timeline = '', hasDetails = false;
+		for (const event of state.events) {
+			// Older webview states (persisted before rawFull existed) may lack the full record
+			const hasFull = typeof event.rawFull === 'string' && event.rawFull.trim() !== '';
+			if (hasFull) hasDetails = true;
+			const detail = hasFull ? '<pre class="gg-event-detail">' + escapeHtml(event.rawFull) + '</pre>' : '';
+			timeline += '<div class="gg-event' + (hasFull ? ' gg-event-expandable' : '') + '"' + (hasFull ? ' title="Click to toggle the full NoteDb record of this event"' : '') + '>' +
+				'<div class="gg-event-row">' +
+				(detail !== '' ? '<span class="gg-event-toggle">' + SVG_ICONS.chevronDown + '</span>' : '') +
+				'<span class="gg-event-icon">' + (icons[event.type] || '\u2022') + '</span>' +
+				'<span class="gg-event-text">' + escapeHtml(event.raw) + (event.labels !== undefined ? ' (' + event.labels.map((label) => escapeHtml(label.name) + score(label.value)).join(', ') + ')' : '') + '</span>' +
+				(event.reviewer !== undefined ? '<span class="gg-event-reviewer">' + escapeHtml(event.reviewer) + '</span>' : '') +
+				'<span class="gg-event-date">' + formatShortDate(event.timestamp).formatted + '</span>' +
+				'</div>' +
+				detail +
+				'</div>';
+		}
+		dialog.showMessage(
+			'<b>Gerrit Change #' + state.change + '</b> &middot; Patch Set ' + state.patchset + ' &middot; <b>' + statusText + '</b>' +
+			(owner !== null ? ' &middot; Owner: ' + escapeHtml(owner) : '') +
+			(state.url !== null ? ' &middot; <a class="' + CLASS_EXTERNAL_URL + '" href="' + escapeHtml(state.url) + '" tabindex="-1">Open in Gerrit</a>' : '') +
+			'<br><b>Code-Review:</b> ' + score(state.codeReview) + ' &nbsp; <b>Verified:</b> ' + score(state.verified) +
+			'<div class="gg-timeline">' + timeline + '</div>' +
+			(hasDetails ? '<span class="gg-hint">Click an event to show its full NoteDb record (patchset, commit hash, labels and status footers).</span>' : '')
+		);
+		// Expand/collapse the detailed NoteDb record of an event when its row is clicked
+		dialog.onClick('.gg-event-expandable', (elem) => elem.classList.toggle('expanded'));
+	}
+
+	private gerritAmendChangeIdAction() {
+		dialog.showForm('Amend a Gerrit <b>Change-Id</b> onto <b><i>HEAD</i></b>?<br><span class="gg-hint">Only possible when HEAD has no Change-Id yet and hasn\'t been pushed to any remote. The commit message of HEAD will gain a "Change-Id: I..." footer - nothing else is changed.</span>', [], 'Yes, amend', () => {
+			runAction({ command: 'gerritAmendChangeId', repo: this.currentRepo }, 'Amending Change-Id');
+		}, null);
+	}
+
+	private gerritSubmitReviewAction() {
+		if (this.gitBranchHead === null) {
+			dialog.showError('Submit for Review', 'Unable to determine the current branch. Check out a branch first.', 'Close', null);
+			return;
+		}
+		const branch = this.gitBranchHead;
+		dialog.showForm('Are you sure you want to push <b><i>HEAD</i></b> to <b>refs/for/' + escapeHtml(branch) + '</b> for Gerrit review?<br><span class="gg-hint">If HEAD has no Change-Id, you will be asked to amend one first.</span>', [], 'Yes, submit', () => {
+			runAction({ command: 'gerritSubmitReview', repo: this.currentRepo, branch: branch, hash: null }, 'Submitting for Review');
+		}, null);
+	}
+
+	private gerritClearRefsAction() {
+		dialog.showForm('Are you sure you want to delete all locally downloaded Gerrit change refs (<b>refs/remotes/' + escapeHtml(this.config.gerrit.remote) + '/changes/*</b>)?<br><span class="gg-hint">The downloaded change commits remain in the object database until Git garbage collects them. If Gerrit fetching is enabled, the latest changes will be re-downloaded on the next refresh.</span>', [], 'Yes, delete', () => {
+			runAction({ command: 'gerritClearRefs', repo: this.currentRepo }, 'Clearing Gerrit Refs');
+		}, null);
+	}
+
+	private initGerritControls() {
+		const controlsRow = this.gerritControlsElem;
+		if (controlsRow === null || !this.config.gerrit.enabled) {
+			if (controlsRow !== null) controlsRow.style.display = 'none';
+			return;
+		}
+
+		// Show Refs toggle (session-level; defaults to the configured value, restored from the previous view state)
+		this.gerritShowRefs = this.gerritShowRefs !== null ? this.gerritShowRefs : this.config.gerrit.showChangeRefs;
+		const showRefsCheckbox = <HTMLInputElement>document.getElementById('gerritShowRefsCheckbox')!;
+		showRefsCheckbox.checked = this.gerritShowRefs;
+		showRefsCheckbox.addEventListener('change', () => {
+			this.gerritShowRefs = showRefsCheckbox.checked;
+			this.saveState();
+			// Badges and meta rows are rendered purely in the webview: a local re-render is sufficient
+			this.render();
+		});
+
+		// Amend Change-Id button (icon + label)
+		const amendBtn = document.getElementById('gerritAmendBtn');
+		if (amendBtn !== null) {
+			amendBtn.innerHTML = SVG_ICONS.pencil + '<span>Amend Change-Id</span>';
+			amendBtn.addEventListener('click', () => this.gerritAmendChangeIdAction());
+		}
+
+		// Submit for Review button (icon + label)
+		const submitBtn = document.getElementById('gerritSubmitBtn');
+		if (submitBtn !== null) {
+			if (this.config.gerrit.showPushButton) {
+				submitBtn.innerHTML = SVG_ICONS.review + '<span>Submit Review</span>';
+				submitBtn.addEventListener('click', () => this.gerritSubmitReviewAction());
+			} else {
+				submitBtn.style.display = 'none';
+			}
+		}
+
+		// Clear downloaded change refs button (icon + label)
+		const clearRefsBtn = document.getElementById('gerritClearRefsBtn');
+		if (clearRefsBtn !== null) {
+			clearRefsBtn.innerHTML = SVG_ICONS.trash + '<span>Clear Refs</span>';
+			clearRefsBtn.addEventListener('click', () => this.gerritClearRefsAction());
+		}
+
+		const filterControl = document.getElementById('gerritFilterControl');
+		if (filterControl === null) return;
+		this.gerritStatusFilter = this.gerritStatusFilter !== null ? this.gerritStatusFilter : Object.assign({}, this.config.gerrit.statusFilter);
+		const chips: { status: keyof GG.GerritStatusFilter, label: string }[] = [
+			{ status: 'new', label: 'Open' }, { status: 'merged', label: 'Merged' }, { status: 'abandoned', label: 'Abandoned' }, { status: 'wip', label: 'WIP' }
+		];
+		filterControl.innerHTML = chips.map((chip) => '<span class="gerritFilterChip" data-status="' + chip.status + '" title="Show Gerrit changes with status: ' + chip.label + '">' + chip.label + '</span>').join('');
+		for (const elem of Array.from(filterControl.querySelectorAll('.gerritFilterChip'))) {
+			const chip = <HTMLElement>elem;
+			const status = <keyof GG.GerritStatusFilter>chip.dataset.status;
+			chip.classList.toggle('active', this.gerritStatusFilter![status]);
+			chip.addEventListener('click', () => {
+				this.gerritStatusFilter![status] = !this.gerritStatusFilter![status];
+				chip.classList.toggle('active', this.gerritStatusFilter![status]);
+				this.saveState();
+				// Status filtering happens in the extension against the cached Gerrit data: instant reload
+				this.requestLoadRepoInfoAndCommits(true, true);
+			});
 		}
 	}
 
@@ -1443,6 +1650,32 @@ class GitGraphView {
 				visible: visibility.copySubject,
 				onClick: () => {
 					sendMessage({ command: 'copyToClipboard', type: 'Commit Subject', data: commit.message });
+				}
+			}
+		], [
+			{
+				title: 'View Gerrit Review Info',
+				visible: this.config.gerrit.enabled,
+				onClick: () => this.showGerritReviewInfo(hash)
+			}, {
+				title: 'Submit for Review' + ELLIPSIS,
+				visible: this.config.gerrit.enabled && this.config.gerrit.showPushButton && hash === this.commitHead,
+				onClick: () => this.gerritSubmitReviewAction()
+			}, {
+				title: 'Fixup into HEAD',
+				visible: this.config.gerrit.enabled && this.commitHead !== null && hash !== this.commitHead,
+				onClick: () => {
+					dialog.showForm('Are you sure you want to fixup the <b>uncommitted changes</b> into commit <b><i>' + abbrevCommit(hash) + '</i></b> (autosquash rebase, preserving its Change-Id)?', [], 'Yes, fixup', () => {
+						runAction({ command: 'gerritAutosquash', repo: this.currentRepo, commitHash: hash, mode: 'fixup' }, 'Fixing up Commit');
+					}, target);
+				}
+			}, {
+				title: 'Squash into HEAD',
+				visible: this.config.gerrit.enabled && this.commitHead !== null && hash !== this.commitHead,
+				onClick: () => {
+					dialog.showForm('Are you sure you want to squash the <b>uncommitted changes</b> into commit <b><i>' + abbrevCommit(hash) + '</i></b> (autosquash rebase, messages combined)?', [], 'Yes, squash', () => {
+						runAction({ command: 'gerritAutosquash', repo: this.currentRepo, commitHash: hash, mode: 'squash' }, 'Squashing Commit');
+					}, target);
 				}
 			}
 		]];
@@ -2144,9 +2377,9 @@ class GitGraphView {
 		const elem = findCommitElemWithId(getCommitElems(), this.getCommitId(hash));
 		if (elem === null) return;
 
-		let elemTop = this.controlsElem.clientHeight + elem.offsetTop;
+		let elemTop = this.getHeaderHeight() + elem.offsetTop;
 		if (alwaysCenterCommit || elemTop - 8 < this.viewElem.scrollTop || elemTop + 32 - this.viewElem.clientHeight > this.viewElem.scrollTop) {
-			this.viewElem.scroll(0, this.controlsElem.clientHeight + elem.offsetTop + 12 - this.viewElem.clientHeight / 2);
+			this.viewElem.scroll(0, this.getHeaderHeight() + elem.offsetTop + 12 - this.viewElem.clientHeight / 2);
 		}
 
 		if (flash && !elem.classList.contains('flash')) {
@@ -2168,6 +2401,13 @@ class GitGraphView {
 		if (!this.tableColHeadersElem) {
 			return;
 		}
+	}
+
+	/**
+	 * Get the total height of the header rows (the main controls row + the Gerrit controls row).
+	 */
+	private getHeaderHeight() {
+		return this.controlsElem.clientHeight + (this.gerritControlsElem !== null ? this.gerritControlsElem.clientHeight : 0);
 	}
 
 
@@ -2219,7 +2459,6 @@ class GitGraphView {
 				this.repoDropdown.refresh();
 				this.branchDropdown.refresh();
 				this.authorDropdown.refresh();
-				this.tagDropdown.refresh();
 
 			}
 			if (fmc !== findMatchColour) {
@@ -2447,11 +2686,24 @@ class GitGraphView {
 			if (isUrlElem(eventTarget)) return;
 			let eventElem: HTMLElement | null;
 
-			if ((eventElem = eventTarget.closest('.gitRef')) !== null) {
+			if ((eventElem = eventTarget.closest('.gg-meta-chip')) !== null) {
+				// Gerrit meta chip was clicked: toggle the expanded state of the change's meta event rows
+				e.stopPropagation();
+				if (contextMenu.isOpen()) contextMenu.close();
+				const change = parseInt(eventElem.dataset.change!);
+				this.toggleGerritChangeExpanded(change);
+				// Meta rows are rendered purely in the webview: re-render the table (and the graph lanes, which must stretch over the meta rows)
+				this.render();
+
+			} else if ((eventElem = eventTarget.closest('.gitRef')) !== null) {
 				// .gitRef was clicked
 				e.stopPropagation();
 				if (contextMenu.isOpen()) {
 					contextMenu.close();
+				}
+				if (eventElem.classList.contains('gerrit')) {
+					// Gerrit change badge was clicked: show the review information
+					this.showGerritReviewInfo(unescapeHtml(eventElem.dataset.hash!));
 				}
 
 			} else if ((eventElem = eventTarget.closest('.commit')) !== null) {
@@ -2537,7 +2789,29 @@ class GitGraphView {
 				};
 
 				let actions: ContextMenuActions;
-				if (eventElem.classList.contains(CLASS_REF_STASH)) {
+				if (eventElem.classList.contains('gerrit')) {
+					// Gerrit change badge was right clicked
+					const gerritState = this.gerritStates[commit.hash];
+					const change = parseInt(eventElem.dataset.change!);
+					contextMenu.show([[
+						{
+							title: 'View Review Info',
+							visible: true,
+							onClick: () => this.showGerritReviewInfo(commit.hash)
+						}, {
+							title: 'Open Change in Gerrit',
+							visible: gerritState !== undefined && gerritState.url !== null,
+							onClick: () => {
+								if (gerritState !== undefined && gerritState.url !== null) sendMessage({ command: 'openExternalUrl', url: gerritState.url });
+							}
+						}, {
+							title: 'Fetch Latest Patchset',
+							visible: true,
+							onClick: () => runAction({ command: 'gerritFetchChange', repo: this.currentRepo, change: change }, 'Fetching Change')
+						}
+					]], false, target, <MouseEvent>e, this.viewElem);
+					return;
+				} else if (eventElem.classList.contains(CLASS_REF_STASH)) {
 					actions = this.getStashContextMenuActions(target);
 				} else if (eventElem.classList.contains(CLASS_REF_TAG)) {
 					actions = this.getTagContextMenuActions(eventElem.dataset.tagtype === 'annotated', target);
@@ -2827,7 +3101,7 @@ class GitGraphView {
 
 		if (!refresh) {
 			if (isDocked) {
-				let elemTop = this.controlsElem.clientHeight + expandedCommit.commitElem.offsetTop;
+				let elemTop = this.getHeaderHeight() + expandedCommit.commitElem.offsetTop;
 				if (elemTop - 8 < this.viewElem.scrollTop) {
 					// Commit is above what is visible on screen
 					this.viewElem.scroll(0, elemTop - 8);
@@ -3599,7 +3873,7 @@ window.addEventListener('load', () => {
 				refreshOrDisplayError(msg.error, 'Unable to Export Repository Configuration');
 				break;
 			case 'fetch':
-				refreshOrDisplayError(msg.error, 'Unable to Fetch from Remote(s)');
+				refreshOrDisplayError(msg.error, 'Unable to Fetch from Remote(s)', false, true);
 				break;
 			case 'fetchAvatar':
 				imageResizer.resize(msg.image, (resizedImage) => {
@@ -3608,6 +3882,42 @@ window.addEventListener('load', () => {
 				break;
 			case 'fetchIntoLocalBranch':
 				refreshOrDisplayError(msg.error, 'Unable to Fetch into Local Branch');
+				break;
+			case 'gerritSubmitReview':
+				refreshOrDisplayError(msg.error, 'Unable to Submit for Review');
+				break;
+			case 'gerritFetchChange':
+				refreshOrDisplayError(msg.error, 'Unable to Fetch Change');
+				break;
+			case 'gerritSaveFetchConfig':
+				if (msg.error === null) {
+					// Saving the settings reloads the Git Graph View, which re-fetches the Gerrit
+					// change refs according to the new cache configuration
+					dialog.closeActionRunning();
+				} else {
+					dialog.showError('Unable to Save Gerrit Settings', msg.error, null, null);
+				}
+				break;
+			case 'gerritClearRefs':
+				if (msg.error === null) {
+					dialog.showMessage('Deleted <b>' + msg.cleared + '</b> Gerrit change ref' + (msg.cleared === 1 ? '' : 's') + ' from <b>refs/remotes/' + escapeHtml(initialState.config.gerrit.remote) + '/changes/*</b>.');
+					gitGraph.refresh(false, false);
+				} else {
+					dialog.showError('Unable to Clear Gerrit Refs', msg.error, null, null);
+				}
+				break;
+			case 'gerritAmendChangeId':
+				if (msg.error === null) {
+					dialog.showMessage(msg.amended
+						? 'Amended the Change-Id <b><i>' + escapeHtml(msg.changeId!) + '</i></b> onto <b><i>HEAD</i></b>.'
+						: 'HEAD already has the Change-Id <b><i>' + escapeHtml(msg.changeId!) + '</i></b> - nothing was amended.');
+					if (msg.amended) gitGraph.refresh(false, false);
+				} else {
+					dialog.showError('Unable to Amend Change-Id', msg.error, null, null);
+				}
+				break;
+			case 'gerritAutosquash':
+				refreshOrDisplayError(msg.error, 'Unable to Fixup/Squash Commit');
 				break;
 			case 'loadCommits':
 				gitGraph.processLoadCommitsResponse(msg);
@@ -3769,9 +4079,9 @@ window.addEventListener('load', () => {
 		}, { type: TargetType.Repo }, 'Cancel', null, true);
 	}
 
-	function refreshOrDisplayError(error: GG.ErrorInfo, errorMessage: string, configChanges: boolean = false) {
+	function refreshOrDisplayError(error: GG.ErrorInfo, errorMessage: string, configChanges: boolean = false, forceGerritRefresh: boolean = false) {
 		if (error === null) {
-			gitGraph.refresh(false, configChanges);
+			gitGraph.refresh(false, configChanges, forceGerritRefresh);
 		} else {
 			dialog.showError(errorMessage, error, null, null);
 		}

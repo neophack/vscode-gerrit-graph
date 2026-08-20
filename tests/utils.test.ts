@@ -945,7 +945,7 @@ describe('openExtensionSettings', () => {
 		const result = await openExtensionSettings();
 
 		// Assert
-		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.openSettings', '@ext:Gxl.git-graph-3');
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.openSettings', '@ext:Gxl.gerrit-graph');
 		expect(result).toBe(null);
 	});
 
@@ -2497,5 +2497,5 @@ describe('constructIncompatibleGitVersionMessage', () => {
 });
 
 function expectedValueGitGraphUri(filePath: string, commit: string, repo: string, exists: boolean) {
-	return 'git-graph://' + encodeURI(filePath) + (!exists ? ' (non-existent)' : '') + '?' + Buffer.from(JSON.stringify({ filePath: filePath, commit: commit, repo: repo, exists: exists })).toString('base64');
+	return 'gerrit-graph://' + encodeURI(filePath) + (!exists ? ' (non-existent)' : '') + '?' + Buffer.from(JSON.stringify({ filePath: filePath, commit: commit, repo: repo, exists: exists })).toString('base64');
 }

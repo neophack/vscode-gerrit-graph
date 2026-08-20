@@ -63,7 +63,8 @@ export const mocks = {
 		inspect: jest.fn((section: string) => ({
 			workspaceValue: mockedExtensionSettingValues[section],
 			globalValue: mockedExtensionSettingValues[section]
-		}))
+		})),
+		update: jest.fn(() => Promise.resolve())
 	}
 };
 
@@ -86,6 +87,7 @@ export const env = {
 	clipboard: {
 		writeText: jest.fn()
 	},
+	language: 'en',
 	openExternal: jest.fn()
 };
 
@@ -140,6 +142,12 @@ export enum StatusBarAlignment {
 	Right = 2
 }
 
+export enum ConfigurationTarget {
+	Global = 1,
+	Workspace = 2,
+	WorkspaceFolder = 3
+}
+
 export let version = '1.51.0';
 
 export enum ViewColumn {
@@ -177,6 +185,7 @@ export const workspace = {
 		dispose: jest.fn()
 	})),
 	getConfiguration: jest.fn(() => mocks.workspaceConfiguration),
+	onDidChangeConfiguration: jest.fn((_: (e: any) => any) => ({ dispose: jest.fn() })),
 	onDidChangeWorkspaceFolders: jest.fn((_: () => Promise<void>) => ({ dispose: jest.fn() })),
 	onDidCloseTextDocument: jest.fn((_: () => void) => ({ dispose: jest.fn() })),
 	workspaceFolders: <{ uri: Uri, index: number }[] | undefined>undefined

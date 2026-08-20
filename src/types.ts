@@ -201,6 +201,60 @@ interface PullRequestConfigCustom extends PullRequestConfigBase {
 
 export type PullRequestConfig = PullRequestConfigBuiltIn | PullRequestConfigCustom;
 
+/* Gerrit Types */
+
+export type GerritChangeEventType = 'created' | 'patchset' | 'vote' | 'merged' | 'abandoned' | 'restored' | 'wip' | 'ready' | 'comment';
+
+export interface GerritChangeEvent {
+	type: GerritChangeEventType;
+	patchset: number;
+	reviewer?: string; // e.g. "Gerrit User 1000018"
+	labels?: { name: string; value: number }[]; // e.g. [{ name: 'Code-Review', value: +2 }]
+	timestamp: number;
+	raw: string;
+	rawFull: string; // the verbatim NoteDb meta commit message (shown when the event is expanded)
+}
+
+export type GerritChangeStatus = 'new' | 'merged' | 'abandoned';
+
+export interface GerritChangeState {
+	change: number;
+	patchset: number; // latest patchset
+	codeReview: number; // -2..2, the vote with the greatest absolute value (most recent wins ties)
+	verified: number; // -1..1
+	status: GerritChangeStatus;
+	wip: boolean;
+	headHash: string; // code commit of the latest patchset (badge/anchor target)
+	events: GerritChangeEvent[];
+	url: string | null; // change web URL (derived from the remote URL), NULL => unknown
+}
+
+export interface GerritStatusFilter {
+	new: boolean;
+	merged: boolean;
+	abandoned: boolean;
+	wip: boolean;
+}
+
+export type GerritFetchMode = 'off' | 'latest' | 'all';
+export type GerritPatchsetsMode = 'latest' | 'all';
+export type GerritMetaMode = 'collapsed' | 'expanded' | 'off';
+
+export interface GerritConfig {
+	enabled: boolean;
+	remote: string;
+	fetchMode: GerritFetchMode;
+	fetchLimit: number;
+	patchsets: GerritPatchsetsMode;
+	autoFetch: boolean;
+	showChangeRefs: boolean;
+	includeChangeCommits: boolean;
+	showReviewProgress: boolean;
+	showMetaCommits: GerritMetaMode;
+	statusFilter: GerritStatusFilter;
+	showPushButton: boolean;
+}
+
 export interface GitRepoState {
 	cdvDivider: number;
 	cdvHeight: number;
@@ -250,6 +304,7 @@ export interface GitGraphViewConfig {
 	readonly fetchAndPruneTags: boolean;
 	readonly fetchAvatars: boolean;
 	readonly graph: GraphConfig;
+	readonly gerrit: GerritConfig;
 	readonly includeCommitsMentionedByReflogs: boolean;
 	readonly initialLoadCommits: number;
 	readonly keybindings: KeybindingConfig
@@ -274,7 +329,6 @@ export interface GitGraphViewGlobalState {
 	alwaysAcceptCheckoutCommit: boolean;
 	issueLinkingConfig: IssueLinkingConfig | null;
 	pushTagSkipRemoteCheck: boolean;
-	hideLogiCarAd: boolean;
 }
 
 export interface GitGraphViewWorkspaceState {
@@ -904,6 +958,60 @@ export interface ResponseFetchAvatar extends BaseMessage {
 	readonly image: string;
 }
 
+export interface RequestGerritSubmitReview extends RepoRequest {
+	readonly command: 'gerritSubmitReview';
+	readonly branch: string; // target branch (pushed to refs/for/<branch>)
+	readonly hash: string | null; // null => HEAD, otherwise => the commit to push
+}
+export interface ResponseGerritSubmitReview extends ResponseWithErrorInfo {
+	readonly command: 'gerritSubmitReview';
+	readonly url: string | null; // the change URL parsed from the push output, NULL => not available
+}
+
+export interface RequestGerritFetchChange extends RepoRequest {
+	readonly command: 'gerritFetchChange';
+	readonly change: number;
+}
+export interface ResponseGerritFetchChange extends ResponseWithErrorInfo {
+	readonly command: 'gerritFetchChange';
+	readonly change: number;
+}
+
+export interface RequestGerritClearRefs extends RepoRequest {
+	readonly command: 'gerritClearRefs';
+}
+export interface ResponseGerritClearRefs extends ResponseWithErrorInfo {
+	readonly command: 'gerritClearRefs';
+	readonly cleared: number; // the number of local Gerrit change refs deleted
+}
+
+export interface RequestGerritAutosquash extends RepoRequest {
+	readonly command: 'gerritAutosquash';
+	readonly commitHash: string;
+	readonly mode: 'fixup' | 'squash';
+}
+export interface ResponseGerritAutosquash extends ResponseWithErrorInfo {
+	readonly command: 'gerritAutosquash';
+}
+
+export interface RequestGerritAmendChangeId extends RepoRequest {
+	readonly command: 'gerritAmendChangeId';
+}
+export interface ResponseGerritAmendChangeId extends ResponseWithErrorInfo {
+	readonly command: 'gerritAmendChangeId';
+	readonly changeId: string | null; // the Change-Id of HEAD (newly amended, or the pre-existing one)
+	readonly amended: boolean; // TRUE => HEAD had no Change-Id and was amended; FALSE => HEAD already had one
+}
+
+export interface RequestGerritSaveFetchConfig extends RepoRequest {
+	readonly command: 'gerritSaveFetchConfig';
+	readonly fetchMode: 'latest' | 'all'; // cache all changes, or only the latest N changes
+	readonly fetchLimit: number; // the number of latest changes to cache (only used in 'latest' fetch mode)
+}
+export interface ResponseGerritSaveFetchConfig extends ResponseWithErrorInfo {
+	readonly command: 'gerritSaveFetchConfig';
+}
+
 export interface RequestFetchIntoLocalBranch extends RepoRequest {
 	readonly command: 'fetchIntoLocalBranch';
 	readonly remote: string;
@@ -920,7 +1028,6 @@ export interface RequestLoadCommits extends RepoRequest {
 	readonly refreshId: number;
 	readonly branches: ReadonlyArray<string> | null; // null => Show All
 	readonly authors: ReadonlyArray<string> | null; // null => Show All
-	readonly tags: ReadonlyArray<string> | null; // null => Show All
 	readonly maxCommits: number;
 	readonly showTags: boolean;
 	readonly showRemoteBranches: boolean;
@@ -930,6 +1037,8 @@ export interface RequestLoadCommits extends RepoRequest {
 	readonly remotes: ReadonlyArray<string>;
 	readonly hideRemotes: ReadonlyArray<string>;
 	readonly stashes: ReadonlyArray<GitStash>;
+	readonly gerritStatusFilter: GerritStatusFilter | null; // null => Gerrit integration disabled (use the default filter)
+	readonly gerritForceRefresh?: boolean; // true => bypass the Gerrit cache and re-fetch the changes from the remote
 }
 export interface ResponseLoadCommits extends ResponseWithErrorInfo {
 	readonly command: 'loadCommits';
@@ -939,6 +1048,7 @@ export interface ResponseLoadCommits extends ResponseWithErrorInfo {
 	readonly tags: string[];
 	readonly moreCommitsAvailable: boolean;
 	readonly onlyFollowFirstParent: boolean;
+	readonly gerritStates: GerritChangeState[] | null; // null => Gerrit integration disabled
 }
 
 export interface RequestLoadConfig extends RepoRequest {
@@ -1314,6 +1424,12 @@ export type RequestMessage =
 	| RequestFetch
 	| RequestFetchAvatar
 	| RequestFetchIntoLocalBranch
+	| RequestGerritAmendChangeId
+	| RequestGerritAutosquash
+	| RequestGerritClearRefs
+	| RequestGerritFetchChange
+	| RequestGerritSaveFetchConfig
+	| RequestGerritSubmitReview
 	| RequestLoadCommits
 	| RequestLoadConfig
 	| RequestLoadRepoInfo
@@ -1379,6 +1495,12 @@ export type ResponseMessage =
 	| ResponseFetch
 	| ResponseFetchAvatar
 	| ResponseFetchIntoLocalBranch
+	| ResponseGerritAutosquash
+	| ResponseGerritAmendChangeId
+	| ResponseGerritClearRefs
+	| ResponseGerritFetchChange
+	| ResponseGerritSaveFetchConfig
+	| ResponseGerritSubmitReview
 	| ResponseLoadCommits
 	| ResponseLoadConfig
 	| ResponseLoadRepoInfo

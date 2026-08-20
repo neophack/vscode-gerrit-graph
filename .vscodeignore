@@ -16,9 +16,8 @@ web/
 .eslintrc.json
 .gitignore
 .nvmrc
-jest.config.jsfix-*.js
-skip-*.py
-.vscodeignore-temp
+jest.config.js
+build-install.bat
 fix-*.js
 skip-*.py
 .vscodeignore-temp

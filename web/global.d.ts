@@ -59,7 +59,6 @@ declare global {
 		readonly avatars: AvatarImageCollection;
 		readonly currentBranches: string[] | null;
 		readonly currentAuthors: string[] | null;
-		readonly currentTags: string[] | null;
 		readonly moreCommitsAvailable: boolean;
 		readonly maxCommits: number;
 		readonly onlyFollowFirstParent: boolean;
@@ -67,6 +66,9 @@ declare global {
 		readonly scrollTop: number;
 		readonly findWidget: FindWidgetState;
 		readonly settingsWidget: SettingsWidgetState;
+		readonly gerritStatusFilter?: GG.GerritStatusFilter | null;
+		readonly gerritShowRefs?: boolean | null;
+		readonly gerritStates?: { [hash: string]: GG.GerritChangeState };
 	}
 
 

@@ -25,6 +25,15 @@ interface PlacedLine {
 	readonly lockedFirst: boolean; // TRUE => The line is locked to p1, FALSE => The line is locked to p2
 }
 
+/**
+ * An insertion of extra height after commit row `index`
+ * (e.g. the inline Commit Details View, or the Gerrit meta event rows of a change).
+ */
+interface RowExpansion {
+	index: number;
+	height: number;
+}
+
 interface UnavailablePoint {
 	readonly connectsTo: VertexOrNull;
 	readonly onBranch: Branch;
@@ -72,46 +81,56 @@ class Branch {
 
 	/* Rendering */
 
-	public draw(svg: SVGElement, config: GG.GraphConfig, expandAt: number) {
-		let colour = config.colours[this.colour % config.colours.length], i, x1, y1, x2, y2, lines: PlacedLine[] = [], curPath = '', d = config.grid.y * (config.style === GG.GraphStyle.Angular ? 0.38 : 0.8), line, nextLine;
+	public draw(svg: SVGElement, config: GG.GraphConfig, expansions: RowExpansion[]) {
+		let colour = config.colours[this.colour % config.colours.length], i, x1, y1, x2, y2, lines: PlacedLine[] = [], curPath = '', d = config.grid.y * (config.style === GG.GraphStyle.Angular ? 0.38 : 0.8), line;
 
-		// Convert branch lines into pixel coordinates, respecting expanded commit extensions
+		// Convert branch lines into pixel coordinates, respecting row expansions
+		// (each expansion inserts extra height after commit row `index`, e.g. the inline Commit Details View or Gerrit meta event rows)
+		let segments: { x1: number, y1: number, row1: number, x2: number, y2: number, row2: number, isCommitted: boolean, lockedFirst: boolean }[] = [];
 		for (i = 0; i < this.lines.length; i++) {
 			line = this.lines[i];
-			x1 = line.p1.x * config.grid.x + config.grid.offsetX; y1 = line.p1.y * config.grid.y + config.grid.offsetY;
-			x2 = line.p2.x * config.grid.x + config.grid.offsetX; y2 = line.p2.y * config.grid.y + config.grid.offsetY;
-
-			// If a commit is expanded, we need to stretch the graph for the height of the commit details view
-			if (expandAt > -1) {
-				if (line.p1.y > expandAt) { // If the line starts after the expansion, move the whole line lower
-					y1 += config.grid.expandY;
-					y2 += config.grid.expandY;
-				} else if (line.p2.y > expandAt) { // If the line crosses the expansion
-					if (x1 === x2) { // The line is vertical, extend the endpoint past the expansion
-						y2 += config.grid.expandY;
-					} else if (line.lockedFirst) { // If the line is locked to the first point, the transition stays in its normal position
-						lines.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, isCommitted: i >= this.numUncommitted, lockedFirst: line.lockedFirst }); // Display the normal transition
-						lines.push({ p1: { x: x2, y: y1 + config.grid.y }, p2: { x: x2, y: y2 + config.grid.expandY }, isCommitted: i >= this.numUncommitted, lockedFirst: line.lockedFirst }); // Extend the line over the expansion from the transition end point
-						continue;
-					} else { // If the line is locked to the second point, the transition moves to after the expansion
-						lines.push({ p1: { x: x1, y: y1 }, p2: { x: x1, y: y2 - config.grid.y + config.grid.expandY }, isCommitted: i >= this.numUncommitted, lockedFirst: line.lockedFirst }); // Extend the line over the expansion to the new transition start point
-						y1 += config.grid.expandY; y2 += config.grid.expandY;
-					}
+			segments.push({
+				x1: line.p1.x * config.grid.x + config.grid.offsetX, y1: line.p1.y * config.grid.y + config.grid.offsetY, row1: line.p1.y,
+				x2: line.p2.x * config.grid.x + config.grid.offsetX, y2: line.p2.y * config.grid.y + config.grid.offsetY, row2: line.p2.y,
+				isCommitted: i >= this.numUncommitted, lockedFirst: line.lockedFirst
+			});
+		}
+		for (const expansion of expansions) {
+			const next: typeof segments = [];
+			for (const s of segments) {
+				if (s.row1 > expansion.index) { // If the line starts after the expansion, move the whole line lower
+					s.y1 += expansion.height;
+					s.y2 += expansion.height;
+					next.push(s);
+				} else if (s.row2 <= expansion.index) { // The line is entirely above the expansion
+					next.push(s);
+				} else if (s.x1 === s.x2) { // The line is vertical and crosses the expansion, extend the endpoint past the expansion
+					s.y2 += expansion.height;
+					next.push(s);
+				} else if (s.lockedFirst) { // If the line is locked to the first point, the transition stays in its normal position
+					next.push({ x1: s.x1, y1: s.y1, row1: s.row1, x2: s.x2, y2: s.y2, row2: s.row1, isCommitted: s.isCommitted, lockedFirst: s.lockedFirst }); // Display the normal transition
+					next.push({ x1: s.x2, y1: s.y1 + config.grid.y, row1: s.row1, x2: s.x2, y2: s.y2 + expansion.height, row2: s.row2, isCommitted: s.isCommitted, lockedFirst: s.lockedFirst }); // Extend the line over the expansion from the transition end point
+				} else { // If the line is locked to the second point, the transition moves to after the expansion
+					next.push({ x1: s.x1, y1: s.y1, row1: s.row1, x2: s.x1, y2: s.y2 - config.grid.y + expansion.height, row2: s.row2, isCommitted: s.isCommitted, lockedFirst: s.lockedFirst }); // Extend the line over the expansion to the new transition start point
+					next.push({ x1: s.x1, y1: s.y1 + expansion.height, row1: s.row2, x2: s.x2, y2: s.y2 + expansion.height, row2: s.row2, isCommitted: s.isCommitted, lockedFirst: s.lockedFirst });
 				}
 			}
-			lines.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, isCommitted: i >= this.numUncommitted, lockedFirst: line.lockedFirst });
+			segments = next;
+		}
+		for (const s of segments) {
+			lines.push({ p1: { x: s.x1, y: s.y1 }, p2: { x: s.x2, y: s.y2 }, isCommitted: s.isCommitted, lockedFirst: s.lockedFirst });
 		}
 
 		// Simplify consecutive lines that are straight by removing the 'middle' point
-		i = 0;
-		while (i < lines.length - 1) {
-			line = lines[i];
-			nextLine = lines[i + 1];
+		let j = 0, nextLine: PlacedLine;
+		while (j < lines.length - 1) {
+			line = lines[j];
+			nextLine = lines[j + 1];
 			if (line.p1.x === line.p2.x && line.p2.x === nextLine.p1.x && nextLine.p1.x === nextLine.p2.x && line.p2.y === nextLine.p1.y && line.isCommitted === nextLine.isCommitted) {
 				line.p2.y = nextLine.p2.y;
-				lines.splice(i + 1, 1);
+				lines.splice(j + 1, 1);
 			} else {
-				i++;
+				j++;
 			}
 		}
 
@@ -295,12 +314,12 @@ class Vertex {
 
 	/* Rendering */
 
-	public draw(svg: SVGElement, config: GG.GraphConfig, expandOffset: boolean, overListener: (event: MouseEvent) => void, outListener: (event: MouseEvent) => void) {
+	public draw(svg: SVGElement, config: GG.GraphConfig, offset: number, overListener: (event: MouseEvent) => void, outListener: (event: MouseEvent) => void) {
 		if (this.onBranch === null) return;
 
 		const colour = this.isCommitted ? config.colours[this.onBranch.getColour() % config.colours.length] : '#808080';
 		const cx = (this.x * config.grid.x + config.grid.offsetX).toString();
-		const cy = (this.id * config.grid.y + config.grid.offsetY + (expandOffset ? config.grid.expandY : 0)).toString();
+		const cy = (this.id * config.grid.y + config.grid.offsetY + offset).toString();
 
 		const circle = document.createElementNS(SVG_NAMESPACE, 'circle');
 		circle.dataset.id = this.id.toString();
@@ -347,6 +366,7 @@ class Graph {
 	private commitLookup: { [hash: string]: number } = {};
 	private onlyFollowFirstParent: boolean = false;
 	private expandedCommitIndex: number = -1;
+	private expansions: RowExpansion[] = [];
 
 	private readonly viewElem: HTMLElement;
 	private readonly contentElem: HTMLElement;
@@ -439,26 +459,40 @@ class Graph {
 		}
 	}
 
-	public render(expandedCommit: ExpandedCommit | null) {
+	public render(expandedCommit: ExpandedCommit | null, metaExpansions: RowExpansion[] = []) {
 		this.expandedCommitIndex = expandedCommit !== null ? expandedCommit.index : -1;
+		this.expansions = (this.expandedCommitIndex > -1 ? [{ index: this.expandedCommitIndex, height: this.config.grid.expandY }] : [])
+			.concat(metaExpansions)
+			.sort((a, b) => a.index - b.index);
 		let group = document.createElementNS(SVG_NAMESPACE, 'g'), i, contentWidth = this.getContentWidth();
 		group.setAttribute('mask', 'url(#GraphMask)');
 
 		for (i = 0; i < this.branches.length; i++) {
-			this.branches[i].draw(group, this.config, this.expandedCommitIndex);
+			this.branches[i].draw(group, this.config, this.expansions);
 		}
 
 		const overListener = (e: MouseEvent) => this.vertexOver(e), outListener = (e: MouseEvent) => this.vertexOut(e);
 		for (i = 0; i < this.vertices.length; i++) {
-			this.vertices[i].draw(group, this.config, expandedCommit !== null && i > expandedCommit.index, overListener, outListener);
+			this.vertices[i].draw(group, this.config, this.getOffsetAt(i), overListener, outListener);
 		}
 
 		if (this.group !== null) this.svg.removeChild(this.group);
 		this.svg.appendChild(group);
 		this.group = group;
-		this.setDimensions(contentWidth, this.getHeight(expandedCommit));
+		this.setDimensions(contentWidth, this.getHeight());
 		this.applyMaxWidth(contentWidth);
 		this.closeTooltip();
+	}
+
+	/**
+	 * Get the total extra height inserted before commit row `index` (expansions of rows above it).
+	 */
+	public getOffsetAt(index: number) {
+		let offset = 0;
+		for (const expansion of this.expansions) {
+			if (expansion.index < index) offset += expansion.height;
+		}
+		return offset;
 	}
 
 
@@ -473,8 +507,10 @@ class Graph {
 		return 2 * this.config.grid.offsetX + (x - 1) * this.config.grid.x;
 	}
 
-	public getHeight(expandedCommit: ExpandedCommit | null) {
-		return this.vertices.length * this.config.grid.y + this.config.grid.offsetY - this.config.grid.y / 2 + (expandedCommit !== null ? this.config.grid.expandY : 0);
+	public getHeight() {
+		let expansionsHeight = 0;
+		for (const expansion of this.expansions) expansionsHeight += expansion.height;
+		return this.vertices.length * this.config.grid.y + this.config.grid.offsetY - this.config.grid.y / 2 + expansionsHeight;
 	}
 
 	public getVertexColours() {
@@ -851,7 +887,7 @@ class Graph {
 		const anchor = document.createElement('div'), pointer = document.createElement('div'), content = document.createElement('div'), shadow = document.createElement('div');
 		const pixel: Pixel = {
 			x: point.x * this.config.grid.x + this.config.grid.offsetX,
-			y: point.y * this.config.grid.y + this.config.grid.offsetY + (this.expandedCommitIndex > -1 && id > this.expandedCommitIndex ? this.config.grid.expandY : 0)
+			y: point.y * this.config.grid.y + this.config.grid.offsetY + this.getOffsetAt(id)
 		};
 
 		anchor.setAttribute('id', 'graphTooltip');

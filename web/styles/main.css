@@ -1043,10 +1043,404 @@ label > input[type=radio]:checked ~ .customRadio:after{
 
 /* General */
 
-#commitGraph, #commitTable th, #commitTable td, .gitRef, #loadingHeader, .unselectable, .roundedBtn, #controls label{
+#commitGraph, #commitTable th, #commitTable td, .gitRef, #loadingHeader, .unselectable, .roundedBtn, #controls label, #gerritControls label{
 	-webkit-user-select:none;
 	user-select:none;
 }
 body.tagLabelsRightAligned .tagsWrapper {
 	margin-left: auto;
+}
+
+
+/* Gerrit Integration */
+
+.gitRef.gerrit svg {
+	fill: #f5a623;
+}
+
+.gitRef.gerrit .gg-label {
+	margin-left: 4px;
+	padding: 0 4px;
+	border-radius: 3px;
+	font-size: 9px;
+	font-weight: bold;
+	color: var(--vscode-editor-background);
+}
+
+.gitRef.gerrit .gg-label.cr2 { background-color: #2da44e; }
+.gitRef.gerrit .gg-label.cr1 { background-color: #84d16d; }
+.gitRef.gerrit .gg-label.cr0 { background-color: #8b949e; }
+.gitRef.gerrit .gg-label.cr-1 { background-color: #e08c38; }
+.gitRef.gerrit .gg-label.cr-2 { background-color: #d1242f; }
+.gitRef.gerrit .gg-label.v1 { background-color: #2da44e; }
+.gitRef.gerrit .gg-label.v-1 { background-color: #d1242f; }
+
+.gitRef.gerrit .gg-status {
+	margin-left: 4px;
+	font-size: 9px;
+	opacity: 0.75;
+}
+
+.gitRef.gerrit .gg-status.merged { color: #8b949e; }
+.gitRef.gerrit .gg-status.abandoned { color: #d1242f; text-decoration: none; }
+.gitRef.gerrit .gg-status.wip { color: #e08c38; }
+
+/* Vertically centred with the .gitRef badges next to it (badge box: margin-top 2px + 18px height + 1px borders => centre at 12px; chip box: 14px + 1px borders => margin-top 4px) */
+.gg-meta-chip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0; /* keep the fixed 14px square even when the description column overflows (same as .gitRef / .commitHeadDot) */
+	margin: 4px 0 0 0;
+	width: 14px;
+	height: 14px;
+	border: 1px solid rgba(139, 148, 158, 0.5);
+	border-radius: 3px;
+	background: transparent;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.gg-meta-chip svg {
+	width: 10px;
+	height: 10px;
+	fill: rgba(139, 148, 158, 0.9);
+	transition: transform 0.1s ease-in-out;
+}
+
+.gg-meta-chip:hover, .gg-meta-chip.expanded {
+	background-color: rgba(139, 148, 158, 0.2);
+	border-color: var(--vscode-editor-foreground);
+}
+
+.gg-meta-chip:hover svg, .gg-meta-chip.expanded svg {
+	fill: var(--vscode-editor-foreground);
+}
+
+.gg-meta-chip.expanded svg {
+	transform: rotate(180deg);
+}
+
+#gerritControls{
+	display:block;
+	position: relative;
+	left:0;
+	right:0;
+	top:0;
+	padding:2px 132px 2px 0;
+	background-color: var(--vscode-editor-background);
+	border-bottom:1px solid rgba(128,128,128,0.35);
+	line-height:24px;
+	text-align:center;
+	font-weight:700;
+	font-size:12px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+#gerritControls.sticky {
+	position:sticky;
+	z-index:12;
+}
+
+.gerritRowLabel {
+	margin: 0 10px 0 4px;
+}
+
+#gerritShowRefsControl{
+	display:inline-block;
+	white-space:nowrap;
+	margin:0 10px;
+	font-weight:400;
+}
+
+#gerritShowRefsControl > .customCheckbox{
+	margin-right:6px;
+}
+
+.gerritFilterChip {
+	display: inline-block;
+	margin: 0 2px;
+	padding: 0 6px;
+	font-size: 10px;
+	line-height: 16px;
+	border: 1px solid var(--vscode-panel-border, #444);
+	border-radius: 8px;
+	opacity: 0.55;
+	cursor: pointer;
+	-webkit-user-select: none;
+	user-select: none;
+	vertical-align: middle;
+}
+
+.gerritFilterChip:hover { opacity: 0.85; }
+
+.gerritFilterChip.active {
+	opacity: 1;
+	border-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	background-color: var(--vscode-button-background);
+}
+
+#gerritSubmitBtn {
+	display: inline-block;
+	vertical-align: middle;
+	margin-left: 12px;
+	padding: 0 10px;
+	line-height: 20px;
+	font-size: 11px;
+	font-weight: 700;
+	border: 1px solid var(--vscode-button-background);
+	border-radius: 3px;
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+#gerritSubmitBtn svg {
+	fill: currentColor;
+	vertical-align: -4px;
+	margin-right: 4px;
+	width: 13px;
+	height: 13px;
+}
+
+#gerritSubmitBtn:hover { background-color: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+
+#gerritAmendBtn {
+	display: inline-block;
+	vertical-align: middle;
+	margin-left: 12px;
+	padding: 0 10px;
+	line-height: 20px;
+	font-size: 11px;
+	font-weight: 700;
+	border: 1px solid var(--vscode-panel-border, #444);
+	border-radius: 3px;
+	background-color: transparent;
+	color: var(--vscode-editor-foreground);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+#gerritAmendBtn svg {
+	fill: currentColor;
+	vertical-align: -3px;
+	margin-right: 4px;
+	width: 11px;
+	height: 13px;
+}
+
+#gerritAmendBtn:hover { border-color: var(--vscode-button-background); color: var(--vscode-button-foreground, var(--vscode-editor-foreground)); }
+
+
+#gerritClearRefsBtn {
+	display: inline-block;
+	vertical-align: middle;
+	margin-left: 8px;
+	padding: 0 10px;
+	line-height: 20px;
+	font-size: 11px;
+	font-weight: 700;
+	border: 1px solid var(--vscode-panel-border, #444);
+	border-radius: 3px;
+	background-color: transparent;
+	color: var(--vscode-editor-foreground);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+#gerritClearRefsBtn svg {
+	fill: currentColor;
+	vertical-align: -3px;
+	margin-right: 4px;
+	width: 11px;
+	height: 13px;
+}
+
+#gerritClearRefsBtn:hover { border-color: var(--vscode-inputValidation-errorBorder, #be1100); color: var(--vscode-errorForeground, #f14c4c); }
+
+/* In-table Gerrit meta event rows (anchored under the change's commit) */
+tr.gg-meta-row td {
+	padding: 0 0 0 24px;
+	height: 18px;
+	font-size: 11px;
+	line-height: 18px;
+	color: rgba(139, 148, 158, 0.95);
+	border-left: 2px dashed rgba(139, 148, 158, 0.55);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+tr.gg-meta-row:first-of-type td {
+	border-top: 2px solid transparent;
+}
+
+tr.gg-meta-row:last-of-type td {
+	border-bottom: 2px dashed rgba(139, 148, 158, 0.55);
+	border-left: 2px dashed rgba(139, 148, 158, 0.55);
+}
+
+.gg-meta-event {
+	display: flex;
+	align-items: baseline;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.gg-meta-event-icon {
+	flex: 0 0 auto;
+	margin-right: 4px;
+	opacity: 0.8;
+}
+
+.gg-meta-event-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.gg-meta-event-reviewer {
+	flex: 0 1 auto;
+	min-width: 4em;
+	margin-left: 6px;
+	text-align: right;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	opacity: 0.7;
+	font-style: italic;
+}
+
+.gg-meta-event-date {
+	flex: 0 0 auto;
+	margin-left: 6px;
+	min-width: 8.5em;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.6;
+}
+
+.gg-timeline {
+	margin-top: 10px;
+	padding-left: 4px;
+	border-left: 2px dashed rgba(139, 148, 158, 0.55);
+}
+
+.gg-event {
+	position: relative;
+	padding: 1px 0 1px 14px;
+	font-size: 11px;
+	border-radius: 3px;
+}
+
+.gg-event-expandable {
+	cursor: pointer;
+}
+
+.gg-event-expandable:hover {
+	background-color: rgba(139, 148, 158, 0.14);
+}
+
+.gg-event::before {
+	content: '';
+	position: absolute;
+	left: -4px;
+	top: 8px;
+	width: 6px;
+	height: 6px;
+	border-radius: 3px;
+	background-color: rgba(139, 148, 158, 0.8);
+}
+
+.gg-event-row {
+	display: flex;
+	align-items: baseline;
+	white-space: nowrap;
+}
+
+.gg-event-toggle {
+	flex: 0 0 auto;
+	width: 12px;
+	height: 12px;
+	margin-right: 2px;
+	opacity: 0.45;
+	transition: transform 0.1s ease-in;
+	transform: rotate(-90deg);
+}
+
+.gg-event-toggle svg {
+	width: 12px;
+	height: 12px;
+	fill: rgba(139, 148, 158, 0.9);
+	display: block;
+}
+
+.gg-event.expanded .gg-event-toggle {
+	transform: rotate(0deg);
+	opacity: 0.8;
+}
+
+.gg-event-detail {
+	display: none;
+	margin: 3px 0 4px 18px;
+	padding: 5px 8px;
+	border-radius: 3px;
+	background-color: rgba(139, 148, 158, 0.12);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 10px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+	cursor: auto;
+	max-height: 220px;
+	overflow-y: auto;
+}
+
+.gg-event.expanded .gg-event-detail {
+	display: block;
+}
+
+.gg-event-icon {
+	flex: 0 0 auto;
+	margin-right: 4px;
+	opacity: 0.8;
+}
+
+.gg-event-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.gg-event-reviewer {
+	flex: 0 1 auto;
+	min-width: 4em;
+	margin-left: 6px;
+	text-align: right;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	opacity: 0.7;
+	font-style: italic;
+}
+
+.gg-event-date {
+	flex: 0 0 auto;
+	margin-left: 6px;
+	min-width: 8.5em;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.6;
+}
+
+.gg-hint {
+	display: block;
+	margin-top: 8px;
+	font-size: 10px;
+	opacity: 0.6;
 }

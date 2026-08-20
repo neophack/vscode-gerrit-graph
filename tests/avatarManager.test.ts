@@ -460,6 +460,49 @@ describe('AvatarManager', () => {
 				]);
 			});
 
+			it('Should fail gracefully when the avatar_url from the GitHub API is not a valid URL', async () => {
+				// Setup
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://github.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '{"author":{"avatar_url":"not-a-valid-url"}}');
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnLog).toHaveBeenCalledWith('Failed to download avatar from GitHub for user4@*****');
+				});
+				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
+				expect(spyOnHttpsGet).toHaveBeenCalledTimes(1);
+				expect(spyOnSaveAvatar).not.toHaveBeenCalled();
+			});
+
+			it('Should correctly combine the pathname and query string of an avatar_url that already contains query parameters', async () => {
+				// Setup
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://github.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '{"author":{"avatar_url":"https://avatar-url/path/to/img?w=100"}}');
+				mockHttpsResponse(200, 'binary-image-data');
+				mockWriteFile(null);
+				mockReadFile('binary-image-data');
+				const avatarEvents = waitForEvents(avatarManager, 1);
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert
+				expect(await avatarEvents).toStrictEqual([{
+					email: 'user4@mhutchie.com',
+					image: 'data:image/png;base64,YmluYXJ5LWltYWdlLWRhdGE='
+				}]);
+				expect(spyOnHttpsGet).toHaveBeenCalledWith({
+					hostname: 'avatar-url',
+					path: '/path/to/img?w=100&size=162',
+					headers: { 'User-Agent': 'vscode-git-graph' },
+					agent: false,
+					timeout: 15000
+				}, expect.anything());
+			});
+
 			it('Should requeue the request when it\'s before the GitHub API timeout', async () => {
 				// Setup
 				spyOnGetRemoteUrl.mockResolvedValueOnce('https://github.com/mhutchie/test-repo.git');
@@ -673,6 +716,49 @@ describe('AvatarManager', () => {
 				expect(spyOnHttpsGet).toHaveBeenCalledWith({
 					hostname: 'avatar-url',
 					path: '/',
+					headers: { 'User-Agent': 'vscode-git-graph' },
+					agent: false,
+					timeout: 15000
+				}, expect.anything());
+			});
+
+			it('Should fail gracefully when the avatar_url from the GitLab API is not a valid URL', async () => {
+				// Setup
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://gitlab.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '[{"avatar_url":"not-a-valid-url"}]');
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnLog).toHaveBeenCalledWith('Failed to download avatar from GitLab for user4@*****');
+				});
+				expect(spyOnGetRemoteUrl).toHaveBeenCalledWith('test-repo', 'test-remote');
+				expect(spyOnHttpsGet).toHaveBeenCalledTimes(1);
+				expect(spyOnSaveAvatar).not.toHaveBeenCalled();
+			});
+
+			it('Should correctly combine the pathname and query string of an avatar_url that already contains query parameters', async () => {
+				// Setup
+				spyOnGetRemoteUrl.mockResolvedValueOnce('https://gitlab.com/mhutchie/test-repo.git');
+				mockHttpsResponse(200, '[{"avatar_url":"https://avatar-url/path/to/img?w=100&h=100"}]');
+				mockHttpsResponse(200, 'binary-image-data');
+				mockWriteFile(null);
+				mockReadFile('binary-image-data');
+				const avatarEvents = waitForEvents(avatarManager, 1);
+
+				// Run
+				avatarManager.fetchAvatarImage('user4@mhutchie.com', 'test-repo', 'test-remote', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+
+				// Assert
+				expect(await avatarEvents).toStrictEqual([{
+					email: 'user4@mhutchie.com',
+					image: 'data:image/png;base64,YmluYXJ5LWltYWdlLWRhdGE='
+				}]);
+				expect(spyOnHttpsGet).toHaveBeenCalledWith({
+					hostname: 'avatar-url',
+					path: '/path/to/img?w=100&h=100',
 					headers: { 'User-Agent': 'vscode-git-graph' },
 					agent: false,
 					timeout: 15000

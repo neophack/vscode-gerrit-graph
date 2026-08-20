@@ -21,7 +21,7 @@ describe('Config', () => {
 		getConfig();
 
 		// Assert
-		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('git-graph', undefined);
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', undefined);
 	});
 
 	it('Should construct a Config instance (for a specific repository)', () => {
@@ -29,7 +29,7 @@ describe('Config', () => {
 		getConfig('/path/to/repo');
 
 		// Assert
-		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('git-graph', {
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', {
 			scheme: 'file',
 			authority: '',
 			path: '/path/to/repo',
@@ -269,7 +269,7 @@ describe('Config', () => {
 					delete: true,
 					merge: true,
 					rebase: true,
-					push: true,
+					push: true, pull: true, createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,
@@ -309,6 +309,7 @@ describe('Config', () => {
 					fetch: true,
 					merge: true,
 					pull: true,
+					createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,
@@ -353,7 +354,7 @@ describe('Config', () => {
 					delete: true,
 					merge: true,
 					rebase: true,
-					push: true,
+					push: true, pull: true, createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,
@@ -393,6 +394,7 @@ describe('Config', () => {
 					fetch: true,
 					merge: true,
 					pull: true,
+					createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,
@@ -455,7 +457,7 @@ describe('Config', () => {
 					delete: true,
 					merge: true,
 					rebase: true,
-					push: true,
+					push: true, pull: true, createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,
@@ -495,6 +497,7 @@ describe('Config', () => {
 					fetch: false,
 					merge: true,
 					pull: true,
+					createBranch: true,
 					viewIssue: true,
 					createPullRequest: true,
 					createArchive: true,

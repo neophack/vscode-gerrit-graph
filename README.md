@@ -1,21 +1,17 @@
 # Git Branch & Tag Graph
 
-**Sponsor:** LogiCar VPN - "Freedom for goal of living a well-reasoned life". Break through the block in countries or regions like China mainland, Hong Kong, Russia, and Belarus with state-of-the-art encryption. Not only access Google/Gemini, but also AI models like ChatGPT and Claude AI. Visit [http://gcosaka.minzhi.online/](http://gcosaka.minzhi.online/). Welcome 3rd party ads to support long standing maintenance!
-
-[![LogiCar VPN Logo](https://ik.imagekit.io/rswqmrzkwj/minzhi.online.logo?updatedAt=1772383512196)](http://gcosaka.minzhi.online/)
-
 **This extension is a distinct fork of the original [Git Graph](https://github.com/mhutchie/vscode-git-graph) extension.**
 
 View a Git Graph of your repository, and perform Git actions from the graph. This fork includes critical fixes for recent VS Code versions and new features not present in the original.
 
-**Source Code**: [GitHub](https://github.com/git-hub-tig/vscode-git-graph)
+**Source Code**: [GitHub](https://github.com/neophack/vscode-gerrit-graph)
 
-For any issues or advice, you can find the pull requests page [here](https://github.com/git-hub-tig/vscode-git-graph/pulls).
+For any issues or advice, you can find the pull requests page [here](https://github.com/neophack/vscode-gerrit-graph/pulls).
 ## Resources
 
-*   [Issues](https://github.com/git-hub-tig/vscode-git-graph/issues)
-*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Gxl.git-graph-3)
-*   [Open VSX Registry](https://open-vsx.org/extension/Gxl/git-graph-3) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
+*   [Issues](https://github.com/neophack/vscode-gerrit-graph/issues)
+*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Gxl.gerrit-graph)
+*   [Open VSX Registry](https://open-vsx.org/extension/Gxl/gerrit-graph) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
 
 This version aims to address some of the long-standing issues and to keep up with the latest VSCode updates.
 

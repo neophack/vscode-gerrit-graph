@@ -200,6 +200,17 @@ class SettingsWidget {
 				html += '</table><div class="settingsSectionButtons lineAbove"><div id="settingsAddRemote" class="addBtn">' + SVG_ICONS.plus + 'Add Remote</div></div></div>';
 			}
 
+			const gerritConfig = this.view.getGerritConfig();
+			if (gerritConfig.enabled) {
+				const gerritCacheValue = gerritConfig.fetchMode === 'all'
+					? 'All open changes'
+					: 'Latest ' + gerritConfig.fetchLimit + ' change' + (gerritConfig.fetchLimit === 1 ? '' : 's');
+				const gerritCacheStr = escapeHtml(gerritCacheValue + ' (Global)');
+				html += '<div class="settingsSection"><h3>Gerrit Code Review</h3><table>' +
+					'<tr class="lineAbove"><td class="left">Change Refs Cache:</td><td class="leftWithEllipsis" title="' + gerritCacheStr + '">' + gerritCacheStr + '</td><td class="btns right"><div id="editGerritFetchConfig" title="Edit Change Refs Cache' + ELLIPSIS + '">' + SVG_ICONS.pencil + '</div></td></tr>' +
+					'</table></div>';
+			}
+
 			html += '<div class="settingsSection centered"><h3>Issue Linking</h3>';
 			const issueLinkingConfig = this.repo.issueLinkingConfig || globalState.issueLinkingConfig;
 			if (issueLinkingConfig !== null) {
@@ -452,6 +463,14 @@ class SettingsWidget {
 				});
 			}
 
+			const editGerritFetchConfigElem = document.getElementById('editGerritFetchConfig');
+			if (editGerritFetchConfigElem !== null) {
+				editGerritFetchConfigElem.addEventListener('click', () => {
+					if (this.currentRepo === null) return;
+					this.showGerritFetchConfigDialog(null, null);
+				});
+			}
+
 			document.getElementById('editIssueLinking')!.addEventListener('click', () => {
 				if (this.repo === null) return;
 				const issueLinkingConfig = this.repo.issueLinkingConfig || globalState.issueLinkingConfig;
@@ -571,6 +590,52 @@ class SettingsWidget {
 	}
 
 	/**
+	 * Show the dialog allowing the user to configure the Gerrit change refs cache
+	 * (cache all open changes, or only the latest N changes).
+	 * @param defaultFetchMode The cache mode to preselect (NULL => the currently configured value).
+	 * @param defaultFetchLimit The number of changes to prefill (NULL => the currently configured value).
+	 */
+	private showGerritFetchConfigDialog(defaultFetchMode: 'latest' | 'all' | null, defaultFetchLimit: string | null) {
+		if (this.currentRepo === null) return;
+		const gerrit = this.view.getGerritConfig();
+		const fetchMode = defaultFetchMode !== null ? defaultFetchMode : (gerrit.fetchMode === 'all' ? 'all' : 'latest');
+		const fetchLimit = defaultFetchLimit !== null ? defaultFetchLimit : String(gerrit.fetchLimit);
+
+		dialog.showForm('<b>Configure the Gerrit Change Refs Cache</b><p style="font-size:12px; margin:6px 0;">Choose whether to cache <b>all</b> open Gerrit changes locally in <b>refs/remotes/' + escapeHtml(gerrit.remote) + '/changes/*</b>, or only the <b>latest N changes</b>.</p>', [
+			{
+				type: DialogInputType.Select, name: 'Cache Mode',
+				options: [
+					{ name: 'All open changes', value: 'all' },
+					{ name: 'Latest changes only', value: 'latest' }
+				],
+				default: fetchMode,
+				info: 'Caching all changes can require downloading a large amount of data. Caching only the latest changes keeps the repository at a constant size (surplus change refs are pruned automatically).'
+			},
+			{ type: DialogInputType.Text, name: 'Number of Changes', default: fetchLimit, placeholder: null, info: 'How many of the latest changes to cache. Only used when the Cache Mode is "Latest changes only". Must be a whole number between 1 and 10000.' }
+		], 'Save', (values) => {
+			if (this.currentRepo === null) return;
+			const newFetchMode = <string>values[0] === 'all' ? 'all' : 'latest';
+			const newFetchLimit = <string>values[1];
+			const trimmedLimit = newFetchLimit.trim();
+			const parsedLimit = /^\d+$/.test(trimmedLimit) ? parseInt(trimmedLimit, 10) : null;
+			const validLimit = parsedLimit !== null && parsedLimit >= 1 && parsedLimit <= 10000;
+			if (newFetchMode === 'latest' && !validLimit) {
+				dialog.showError('Invalid Number of Changes', 'The number of changes to cache must be a whole number between 1 and 10000.', 'Go Back', () => {
+					this.showGerritFetchConfigDialog(newFetchMode, newFetchLimit);
+				});
+			} else {
+				runAction({
+					command: 'gerritSaveFetchConfig',
+					repo: this.currentRepo,
+					fetchMode: newFetchMode,
+					// In "All open changes" mode the limit isn't used: keep the currently configured value
+					fetchLimit: validLimit ? parsedLimit! : gerrit.fetchLimit
+				}, 'Saving Gerrit Settings');
+			}
+		}, null, 'Cancel', null, false);
+	}
+
+	/**
 	 * Show the dialog allowing the user to configure the issue linking for this repository.
 	 * @param defaultIssueRegex The default regular expression used to match issue numbers.
 	 * @param defaultIssueUrl The default URL for the issue number to be substituted into.
@@ -579,8 +644,8 @@ class SettingsWidget {
 	 */
 	private showIssueLinkingDialog(defaultIssueRegex: string | null, defaultIssueUrl: string | null, defaultUseGlobally: boolean, isEdit: boolean) {
 		let html = '<b>' + (isEdit ? 'Edit Issue Linking for' : 'Add Issue Linking to') + ' this Repository</b>';
-		html += '<p style="font-size:12px; margin:6px 0;">The following example links <b>#123</b> in commit messages to <b>https://github.com/mhutchie/repo/issues/123</b>:</p>';
-		html += '<table style="display:inline-table; width:360px; text-align:left; font-size:12px; margin-bottom:2px;"><tr><td>Issue Regex:</td><td>#(\\d+)</td></tr><tr><td>Issue URL:</td><td>https://github.com/mhutchie/repo/issues/$1</td></tr></tbody></table>';
+		html += '<p style="font-size:12px; margin:6px 0;">The following example links <b>#123</b> in commit messages to <b>https://github.com/your-org/your-repo/issues/123</b>:</p>';
+		html += '<table style="display:inline-table; width:360px; text-align:left; font-size:12px; margin-bottom:2px;"><tr><td>Issue Regex:</td><td>#(\\d+)</td></tr><tr><td>Issue URL:</td><td>https://github.com/your-org/your-repo/issues/$1</td></tr></tbody></table>';
 
 		if (!isEdit && defaultIssueRegex === null && defaultIssueUrl === null) {
 			defaultIssueRegex = SettingsWidget.autoDetectIssueRegex(this.view.getCommits());
@@ -667,7 +732,7 @@ class SettingsWidget {
 			{
 				type: DialogInputType.Select, name: 'Provider',
 				options: providerOptions, default: defaultProvider,
-				info: 'In addition to the built-in publicly hosted Pull Request providers, custom providers can be configured using the Extension Setting "git-graph.customPullRequestProviders" (e.g. for use with privately hosted Pull Request providers).'
+				info: 'In addition to the built-in publicly hosted Pull Request providers, custom providers can be configured using the Extension Setting "gerrit-graph.customPullRequestProviders" (e.g. for use with privately hosted Pull Request providers).'
 			},
 			{
 				type: DialogInputType.Select, name: 'Source Remote',

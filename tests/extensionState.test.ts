@@ -428,8 +428,7 @@ describe('ExtensionState', () => {
 			const globalViewState: GitGraphViewGlobalState = {
 				alwaysAcceptCheckoutCommit: true,
 				issueLinkingConfig: null,
-				pushTagSkipRemoteCheck: false,
-				hideLogiCarAd: false
+				pushTagSkipRemoteCheck: false
 			};
 			extensionContext.globalState.get.mockReturnValueOnce(globalViewState);
 
@@ -455,8 +454,7 @@ describe('ExtensionState', () => {
 			expect(result).toStrictEqual({
 				alwaysAcceptCheckoutCommit: false,
 				issueLinkingConfig: null,
-				pushTagSkipRemoteCheck: false,
-				hideLogiCarAd: false
+				pushTagSkipRemoteCheck: false
 			});
 		});
 
@@ -472,8 +470,7 @@ describe('ExtensionState', () => {
 			expect(result).toStrictEqual({
 				alwaysAcceptCheckoutCommit: false,
 				issueLinkingConfig: null,
-				pushTagSkipRemoteCheck: false,
-				hideLogiCarAd: false
+				pushTagSkipRemoteCheck: false
 			});
 		});
 	});
@@ -484,8 +481,7 @@ describe('ExtensionState', () => {
 			const globalViewState: GitGraphViewGlobalState = {
 				alwaysAcceptCheckoutCommit: true,
 				issueLinkingConfig: null,
-				pushTagSkipRemoteCheck: false,
-				hideLogiCarAd: false
+				pushTagSkipRemoteCheck: false
 			};
 			extensionContext.globalState.update.mockResolvedValueOnce(null);
 
@@ -502,8 +498,7 @@ describe('ExtensionState', () => {
 			const globalViewState: GitGraphViewGlobalState = {
 				alwaysAcceptCheckoutCommit: true,
 				issueLinkingConfig: null,
-				pushTagSkipRemoteCheck: false,
-				hideLogiCarAd: false
+				pushTagSkipRemoteCheck: false
 			};
 			extensionContext.globalState.update.mockRejectedValueOnce(null);
 

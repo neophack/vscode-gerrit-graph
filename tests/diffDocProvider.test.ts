@@ -120,19 +120,17 @@ describe('DiffDocProvider', () => {
 		diffDocProvider.dispose();
 	});
 
-	it('Should display an error message if an error occurred when fetching the file contents from the DataSource, and return an empty document', async () => {
+	it('Should display an error message if an error occurred when fetching the file contents from the DataSource, and return the error message', async () => {
 		// Setup
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Modified, DiffSide.New);
 		jest.spyOn(dataSource, 'getCommitFile').mockRejectedValueOnce('error-message');
-		vscode.window.showErrorMessage.mockResolvedValue(null);
 
 		// Run
 		const diffDocProvider = new DiffDocProvider(dataSource);
 		const docContents = await diffDocProvider.provideTextDocumentContent(uri);
 
 		// Assert
-		expect(docContents).toBe('');
-		expect(vscode.window.showErrorMessage).toBeCalledWith('Unable to retrieve file: error-message');
+		expect(docContents).toBe('Unable to retrieve file: error-message');
 
 		// Teardown
 		diffDocProvider.dispose();
@@ -154,7 +152,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Added, DiffSide.Old);
 
 		// Assert
-		expect(uri.scheme).toBe('git-graph');
+		expect(uri.scheme).toBe('gerrit-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt (non-existent)');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjpmYWxzZX0=');
 	});
@@ -164,7 +162,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Deleted, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('git-graph');
+		expect(uri.scheme).toBe('gerrit-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt (non-existent)');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjpmYWxzZX0=');
 	});
@@ -174,7 +172,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file.txt', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Modified, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('git-graph');
+		expect(uri.scheme).toBe('gerrit-graph');
 		expect(uri.fsPath).toBe('path/to/file.txt');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjp0cnVlfQ==');
 	});
@@ -184,7 +182,7 @@ describe('encodeDiffDocUri', () => {
 		const uri = encodeDiffDocUri('/repo', 'path/to/file', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', GitFileStatus.Modified, DiffSide.New);
 
 		// Assert
-		expect(uri.scheme).toBe('git-graph');
+		expect(uri.scheme).toBe('gerrit-graph');
 		expect(uri.fsPath).toBe('path/to/file');
 		expect(uri.query).toBe('eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZSIsImNvbW1pdCI6IjFhMmIzYzRkNWU2ZjFhMmIzYzRkNWU2ZjFhMmIzYzRkNWU2ZjFhMmIiLCJyZXBvIjoiL3JlcG8iLCJleGlzdHMiOnRydWV9');
 	});
@@ -194,7 +192,7 @@ describe('decodeDiffDocUri', () => {
 	it('Should return the parsed DiffDocUriData from the URI', () => {
 		// Run
 		const value = decodeDiffDocUri(vscode.Uri.file('file.txt').with({
-			scheme: 'git-graph',
+			scheme: 'gerrit-graph',
 			query: 'eyJmaWxlUGF0aCI6InBhdGgvdG8vZmlsZS50eHQiLCJjb21taXQiOiIxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiM2M0ZDVlNmYxYTJiIiwicmVwbyI6Ii9yZXBvIiwiZXhpc3RzIjp0cnVlfQ=='
 		}));
 

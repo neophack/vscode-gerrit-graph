@@ -312,6 +312,22 @@ class Dialog {
 	}
 
 	/**
+	 * Register a click handler on every element inside the currently open dialog matching a selector.
+	 * Must be called after the dialog content has been rendered (e.g. directly after showMessage).
+	 * @param selector The CSS selector of the elements to register the handler on.
+	 * @param handler The callback invoked with the clicked element.
+	 */
+	public onClick(selector: string, handler: { (elem: HTMLElement): void }) {
+		if (this.elem === null) return;
+		for (const elem of Array.from(this.elem.querySelectorAll(selector))) {
+			elem.addEventListener('click', (event) => {
+				event.stopPropagation();
+				handler(<HTMLElement>elem);
+			});
+		}
+	}
+
+	/**
 	 * Show an error to the user in a dialog.
 	 * @param message The high-level category of the error.
 	 * @param reason The error details.

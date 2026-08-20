@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { AskpassEnvironment, AskpassManager } from './askpass/askpassManager';
 import { getConfig } from './config';
+import { GerritDataSource } from './gerrit';
 import { Logger } from './logger';
 import { ActionedUser, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
 import { GitExecutable, GitVersionRequirement, UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, constructIncompatibleGitVersionMessage, doesVersionMeetRequirement, getPathFromStr, getPathFromUri, openGitTerminal, pathWithTrailingSlash, realpath, resolveSpawnOutput, showErrorMessage } from './utils';
@@ -40,6 +41,7 @@ const GPG_STATUS_CODE_PARSING_DETAILS: Readonly<{ [statusCode: string]: GpgStatu
 export class DataSource extends Disposable {
 	private readonly logger: Logger;
 	private readonly askpassEnv: AskpassEnvironment;
+	public readonly gerrit: GerritDataSource;
 	private gitExecutable!: GitExecutable | null;
 	private gitExecutableSupportsGpgInfo!: boolean;
 	private gitFormatCommitDetails!: string;
@@ -59,13 +61,14 @@ export class DataSource extends Disposable {
 
 		const askpassManager = new AskpassManager();
 		this.askpassEnv = askpassManager.getEnv();
+		this.gerrit = new GerritDataSource(this);
 
 		this.registerDisposables(
 			onDidChangeConfiguration((event) => {
 				if (
-					event.affectsConfiguration('git-graph.date.type') || event.affectsConfiguration('git-graph.dateType') ||
-					event.affectsConfiguration('git-graph.repository.commits.showSignatureStatus') || event.affectsConfiguration('git-graph.showSignatureStatus') ||
-					event.affectsConfiguration('git-graph.repository.useMailmap') || event.affectsConfiguration('git-graph.useMailmap')
+					event.affectsConfiguration('gerrit-graph.date.type') || event.affectsConfiguration('gerrit-graph.dateType') ||
+					event.affectsConfiguration('gerrit-graph.repository.commits.showSignatureStatus') || event.affectsConfiguration('gerrit-graph.showSignatureStatus') ||
+					event.affectsConfiguration('gerrit-graph.repository.useMailmap') || event.affectsConfiguration('gerrit-graph.useMailmap')
 				) {
 					this.generateGitCommandFormats();
 				}
@@ -181,7 +184,6 @@ export class DataSource extends Disposable {
 	 * Get the commits in a repository.
 	 * @param repo The path of the repository.
 	 * @param branches The list of branch heads to display, or NULL (show all).
-	 * @param tags The list of tags to display, or NULL (show all).
 	 * @param maxCommits The maximum number of commits to return.
 	 * @param showTags Are tags are shown.
 	 * @param showRemoteBranches Are remote branches shown.
@@ -193,11 +195,11 @@ export class DataSource extends Disposable {
 	 * @param stashes An array of all stashes in the repository.
 	 * @returns The commits in the repository.
 	 */
-	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, tags: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>): Promise<GitCommitData> {
+	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null): Promise<GitCommitData> {
 		const config = getConfig();
-		const refs = branches === null && tags === null ? null : (branches || []).concat(tags || []);
+		const refs = branches;
 		return Promise.all([
-			this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes),
+			this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes, gerritRefs),
 			this.getRefs(repo, showRemoteBranches, config.showRemoteHeads, hideRemotes).then((refData: GitRefData) => refData, (errorMessage: string) => errorMessage)
 		]).then(async (results) => {
 			let commits: GitCommitRecord[] = results[0], refData: GitRefData | string = results[1], i;
@@ -1639,9 +1641,10 @@ export class DataSource extends Disposable {
 	 * @param remotes An array of the known remotes.
 	 * @param hideRemotes An array of hidden remotes.
 	 * @param stashes An array of all stashes in the repository.
+	 * @param gerritRefs The list of Gerrit change refs allowed into the graph (NULL => Gerrit integration disabled). Only used when showing all refs.
 	 * @returns An array of commits.
 	 */
-	private getLog(repo: string, refs: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, num: number, includeTags: boolean, includeRemotes: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, order: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>) {
+	private getLog(repo: string, refs: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, num: number, includeTags: boolean, includeRemotes: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, order: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null) {
 		const args = ['-c', 'log.showSignature=false', 'log', '--max-count=' + num, '--format=' + this.gitFormatLog, '--' + order + '-order', '-z'];
 		if (onlyFollowFirstParent) {
 			args.push('--first-parent');
@@ -1662,10 +1665,13 @@ export class DataSource extends Disposable {
 			if (includeCommitsMentionedByReflogs) args.push('--reflog');
 			if (includeRemotes) {
 				if (hideRemotes.length === 0) {
-					args.push('--remotes');
+					// NOTE: --exclude patterns are matched relative to refs/remotes/ when combined with --remotes,
+					// so this pattern must NOT include the refs/remotes/ prefix (a trailing /* matches everything below)
+					args.push('--exclude=*/changes/*', '--remotes');
 				} else {
 					remotes.filter((remote) => !hideRemotes.includes(remote)).forEach((remote) => {
-						args.push('--glob=refs/remotes/' + remote);
+						// NOTE: in contrast, --exclude patterns paired with --glob are matched against the full refname
+						args.push('--exclude=refs/remotes/' + remote + '/changes/*', '--glob=refs/remotes/' + remote);
 					});
 				}
 			}
@@ -1674,6 +1680,11 @@ export class DataSource extends Disposable {
 			stashBaseHashes.filter((hash, index) => stashBaseHashes.indexOf(hash) === index).forEach((hash) => args.push(hash));
 
 			args.push('HEAD');
+		}
+		// Explicitly allow the (already filtered) Gerrit change refs into the graph,
+		// regardless of whether all refs or a specific set of branches is being shown
+		if (gerritRefs !== null) {
+			for (const ref of gerritRefs) args.push(ref);
 		}
 		args.push('--');
 
@@ -1732,11 +1743,14 @@ export class DataSource extends Disposable {
 					if (!hideRemotePatterns.some((pattern) => ref.startsWith(pattern)) && (showRemoteHeads || !ref.endsWith('/HEAD'))) {
 						let remoteRef = ref.substring(13);
 						let tagsIndex = remoteRef.indexOf('/tags/');
+						let changesIndex = remoteRef.indexOf('/changes/');
 						if (tagsIndex > -1) {
 							let annotated = remoteRef.endsWith('^{}');
 							let name = remoteRef.substring(0, tagsIndex) + '/' + remoteRef.substring(tagsIndex + 6);
 							if (annotated) name = name.substring(0, name.length - 3);
 							refData.tags.push({ hash: hash, name: name, annotated: annotated });
+						} else if (changesIndex > -1) {
+							// Gerrit change ref (refs/remotes/<remote>/changes/...) - not displayed as a remote branch ref
 						} else {
 							refData.remotes.push({ hash: hash, name: remoteRef });
 						}
@@ -1969,8 +1983,18 @@ export class DataSource extends Disposable {
 	 * @param repo The repository to run the command in.
 	 * @returns The returned ErrorInfo (suitable for being sent to the Git Graph View).
 	 */
-	private runGitCommand(args: string[], repo: string): Promise<ErrorInfo> {
+	public runGitCommand(args: string[], repo: string): Promise<ErrorInfo> {
 		return this._spawnGit(args, repo, () => null).catch((errorMessage: string) => errorMessage);
+	}
+
+	/**
+	 * Spawn Git, with the return value resolved from `stdout` as a string (public wrapper used by `GerritDataSource`).
+	 * @param args The arguments to pass to Git.
+	 * @param repo The repository to run the command in.
+	 * @param resolveValue A callback invoked to resolve the data from `stdout`.
+	 */
+	public gitOutput<T>(args: string[], repo: string, resolveValue: { (stdout: string): T }) {
+		return this._spawnGit(args, repo, (stdout) => resolveValue(stdout.toString()));
 	}
 
 	/**
@@ -1980,7 +2004,7 @@ export class DataSource extends Disposable {
 	 * @param resolveValue A callback invoked to resolve the data from `stdout`.
 	 */
 	private spawnGit<T>(args: string[], repo: string, resolveValue: { (stdout: string): T }) {
-		return this._spawnGit(args, repo, (stdout) => resolveValue(stdout.toString()));
+		return this.gitOutput(args, repo, resolveValue);
 	}
 
 	/**

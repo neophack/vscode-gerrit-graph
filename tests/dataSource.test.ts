@@ -221,7 +221,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['reflog', '--format=%HXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%PXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%gDXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%anXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aeXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%atXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%s', 'refs/stash', '--'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it.skip('Should return the repository info (using git-graph.date.type)', async () => {
+		it.skip('Should return the repository info (using gerrit-graph.date.type)', async () => {
 			// Setup
 			mockGitSuccessOnce(
 				'* develop\n' +
@@ -236,7 +236,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.date.type'
+				affectsConfiguration: (section) => section === 'gerrit-graph.date.type'
 			});
 			const result = await dataSource.getRepoInfo('/path/to/repo', false, true, []);
 
@@ -253,7 +253,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['reflog', '--format=%HXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%PXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%gDXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%anXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aeXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%ctXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%s', 'refs/stash', '--'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it.skip('Should return the repository info (using git-graph.dateType)', async () => {
+		it.skip('Should return the repository info (using gerrit-graph.dateType)', async () => {
 			// Setup
 			mockGitSuccessOnce(
 				'* develop\n' +
@@ -268,7 +268,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.dateType'
+				affectsConfiguration: (section) => section === 'gerrit-graph.dateType'
 			});
 			const result = await dataSource.getRepoInfo('/path/to/repo', false, true, []);
 
@@ -285,7 +285,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['reflog', '--format=%HXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%PXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%gDXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%anXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aeXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%ctXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%s', 'refs/stash', '--'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it.skip('Should return the repository info (using git-graph.repository.useMailmap)', async () => {
+		it.skip('Should return the repository info (using gerrit-graph.repository.useMailmap)', async () => {
 			// Setup
 			mockGitSuccessOnce(
 				'* develop\n' +
@@ -300,7 +300,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.repository.useMailmap'
+				affectsConfiguration: (section) => section === 'gerrit-graph.repository.useMailmap'
 			});
 			const result = await dataSource.getRepoInfo('/path/to/repo', false, true, []);
 
@@ -317,7 +317,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['reflog', '--format=%HXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%PXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%gDXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aNXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aEXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%atXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%s', 'refs/stash', '--'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it.skip('Should return the repository info (using git-graph.useMailmap)', async () => {
+		it.skip('Should return the repository info (using gerrit-graph.useMailmap)', async () => {
 			// Setup
 			mockGitSuccessOnce(
 				'* develop\n' +
@@ -332,7 +332,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.useMailmap'
+				affectsConfiguration: (section) => section === 'gerrit-graph.useMailmap'
 			});
 			const result = await dataSource.getRepoInfo('/path/to/repo', false, true, []);
 
@@ -530,7 +530,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -626,7 +626,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', ['master', 'develop'], null, null, 300, true, true, false, false, CommitOrdering.AuthorDate, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', ['master', 'develop'], null, 300, true, true, false, false, CommitOrdering.AuthorDate, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -712,7 +712,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 2, true, true, false, false, CommitOrdering.Topological, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 2, true, true, false, false, CommitOrdering.Topological, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -786,7 +786,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -860,7 +860,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -938,7 +938,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1029,7 +1029,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, false, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, false, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1120,7 +1120,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1210,7 +1210,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, false, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, false, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1302,7 +1302,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, true, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, true, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1394,7 +1394,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, true, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, true, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1489,7 +1489,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1585,7 +1585,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin', 'other-remote'], ['other-remote'], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin', 'other-remote'], ['other-remote'], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -1676,7 +1676,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
 				{
 					hash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
 					baseHash: '2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c',
@@ -1780,7 +1780,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
 				{
 					hash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
 					baseHash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
@@ -1922,7 +1922,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
 				{
 					hash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
 					baseHash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
@@ -2064,7 +2064,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], [
 				{
 					hash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
 					baseHash: '6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a',
@@ -2163,7 +2163,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -2223,7 +2223,7 @@ describe('DataSource', () => {
 			vscode.mockExtensionSettingReturnValue('repository.showRemoteHeads', true);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -2267,7 +2267,7 @@ describe('DataSource', () => {
 			date.setCurrentTime(1587559259);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -2347,7 +2347,7 @@ describe('DataSource', () => {
 			vscode.mockExtensionSettingReturnValue('repository.showRemoteHeads', true);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -2371,7 +2371,7 @@ describe('DataSource', () => {
 			vscode.mockExtensionSettingReturnValue('repository.showRemoteHeads', true);
 
 			// Run
-			const result = await dataSource.getCommits('/path/to/repo', null, null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+			const result = await dataSource.getCommits('/path/to/repo', null, null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
 
 			// Assert
 			expect(result).toStrictEqual({
@@ -2761,7 +2761,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['diff-tree', '--numstat', '-r', '--root', '--find-renames', '--diff-filter=AMDR', '-z', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it('Should return the commit details (using git-graph.repository.commits.showSignatureStatus)', async () => {
+		it('Should return the commit details (using gerrit-graph.repository.commits.showSignatureStatus)', async () => {
 			// Setup
 			mockGitSuccessOnce('1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2bXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPba1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest AuthorXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-author@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559258XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest CommitterXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-committer@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559259XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbGXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest Signer <test-signer@mhutchie.com> XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb0123456789ABCDEFXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbCommit Message.\r\nSecond Line.');
 			mockGitSuccessOnce(['D', 'dir/deleted.txt', 'M', 'dir/modified.txt', 'R100', 'dir/renamed-old.txt', 'dir/renamed-new.txt', ''].join('\0'));
@@ -2773,7 +2773,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.repository.commits.showSignatureStatus'
+				affectsConfiguration: (section) => section === 'gerrit-graph.repository.commits.showSignatureStatus'
 			});
 			const result = await dataSource.getCommitDetails('/path/to/repo', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', true);
 
@@ -2825,7 +2825,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['diff', '--numstat', '--find-renames', '--diff-filter=AMDR', '-z', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b^', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it('Should return the commit details (using git-graph.showSignatureStatus)', async () => {
+		it('Should return the commit details (using gerrit-graph.showSignatureStatus)', async () => {
 			// Setup
 			mockGitSuccessOnce('1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2bXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPba1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest AuthorXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-author@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559258XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest CommitterXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-committer@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559259XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbGXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest Signer <test-signer@mhutchie.com> XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb0123456789ABCDEFXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbCommit Message.\r\nSecond Line.');
 			mockGitSuccessOnce(['D', 'dir/deleted.txt', 'M', 'dir/modified.txt', 'R100', 'dir/renamed-old.txt', 'dir/renamed-new.txt', ''].join('\0'));
@@ -2837,7 +2837,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.showSignatureStatus'
+				affectsConfiguration: (section) => section === 'gerrit-graph.showSignatureStatus'
 			});
 			const result = await dataSource.getCommitDetails('/path/to/repo', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', true);
 
@@ -2946,7 +2946,7 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['diff', '--numstat', '--find-renames', '--diff-filter=AMDR', '-z', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b^', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
-		it('Should return the commit details (using git-graph.repository.useMailmap)', async () => {
+		it('Should return the commit details (using gerrit-graph.repository.useMailmap)', async () => {
 			// Setup
 			mockGitSuccessOnce('1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2bXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPba1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest AuthorXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-author@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559258XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbTest CommitterXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbtest-committer@mhutchie.comXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb1587559259XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPbCommit Message.\r\nSecond Line.');
 			mockGitSuccessOnce(['D', 'dir/deleted.txt', 'M', 'dir/modified.txt', 'R100', 'dir/renamed-old.txt', 'dir/renamed-new.txt', ''].join('\0'));
@@ -2957,7 +2957,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.repository.useMailmap'
+				affectsConfiguration: (section) => section === 'gerrit-graph.repository.useMailmap'
 			});
 			const result = await dataSource.getCommitDetails('/path/to/repo', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', true);
 
@@ -3744,7 +3744,7 @@ describe('DataSource', () => {
 			// Assert
 			expect(result.toString()).toBe('File contents.\n');
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['show', '--textconv', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b:subdirectory/file.txt'], expect.objectContaining({ cwd: '/path/to/repo' }));
-			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('git-graph', {
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', {
 				scheme: 'file',
 				authority: '',
 				path: '/path/to/repo',
@@ -3766,7 +3766,7 @@ describe('DataSource', () => {
 			// Assert
 			expect(result.toString()).toBe('File contents.\n');
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['show', '--textconv', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b:subdirectory/file.txt'], expect.objectContaining({ cwd: '/path/to/repo' }));
-			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('git-graph', {
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('gerrit-graph', {
 				scheme: 'file',
 				authority: '',
 				path: '/path/to/repo',
@@ -5391,17 +5391,20 @@ describe('DataSource', () => {
 		it('Should fetch a remote branch into a local branch', async () => {
 			// Setup
 			mockGitSuccessOnce();
+			mockGitSuccessOnce();
 
 			// Run
 			const result = await dataSource.fetchIntoLocalBranch('/path/to/repo', 'origin', 'master', 'develop', false);
 
 			// Assert
 			expect(result).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['symbolic-ref', '--short', 'HEAD'], expect.objectContaining({ cwd: '/path/to/repo' }));
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['fetch', 'origin', 'master:develop'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
 		it('Should (force) fetch a remote branch into a local branch', async () => {
 			// Setup
+			mockGitSuccessOnce();
 			mockGitSuccessOnce();
 
 			// Run
@@ -5409,11 +5412,13 @@ describe('DataSource', () => {
 
 			// Assert
 			expect(result).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['symbolic-ref', '--short', 'HEAD'], expect.objectContaining({ cwd: '/path/to/repo' }));
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['fetch', '-f', 'origin', 'master:develop'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
 		it('Should return an error message thrown by git', async () => {
 			// Setup
+			mockGitSuccessOnce();
 			mockGitThrowingErrorOnce();
 
 			// Run
@@ -6804,7 +6809,7 @@ describe('DataSource', () => {
 
 			// Run
 			onDidChangeConfiguration.emit({
-				affectsConfiguration: (section) => section === 'git-graph.commitDetailsView.autoCenter'
+				affectsConfiguration: (section) => section === 'gerrit-graph.commitDetailsView.autoCenter'
 			});
 
 			// Assert
