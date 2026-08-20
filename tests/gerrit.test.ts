@@ -1,5 +1,17 @@
 import * as vscode from './mocks/vscode';
 jest.mock('vscode', () => vscode, { virtual: true });
+import * as fs from 'fs';
+import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
+
+/** Create a temporary repository directory (optionally containing the given hooks). */
+function makeTmpRepo(hooks: string[]) {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-gerrit-test-'));
+	(<any>fs).mkdirSync(path.join(repo, '.git', 'hooks'), { recursive: true });
+	for (const hook of hooks) fs.writeFileSync(path.join(repo, '.git', 'hooks', hook), '#!/bin/sh' + String.fromCharCode(10));
+	return repo;
+}
 import {
 	GerritDataSource,
 	buildFetchRefspecs,
@@ -515,4 +527,118 @@ describe('Gerrit', () => {
 			);
 		});
 	});
+
+	describe('getHookStatus', () => {
+		const fakeGit = (gitDir: string) => ({
+			gitOutput: (args: string[], _repo: string, resolve: { (stdout: string): any }) => {
+				if (args[0] === 'rev-parse') return Promise.resolve(resolve(gitDir));
+				return Promise.resolve(resolve(''));
+			},
+			runGitCommand: () => Promise.resolve(null),
+			runGitCommandWithInput: () => Promise.resolve(null)
+		});
+		it('reports every tracked hook with its installed state', async () => {
+			const repo = makeTmpRepo(['commit-msg']);
+			const hooks = await new GerritDataSource(fakeGit('.git')).getHookStatus(repo);
+			expect(hooks.error).toBeNull();
+			expect(hooks.hooks).toEqual([
+				{ name: 'pre-commit', installed: false, installable: false },
+				{ name: 'commit-msg', installed: true, installable: true },
+				{ name: 'post-commit', installed: false, installable: false }
+			]);
+		});
+		it('resolves a relative git-dir against the repository path', async () => {
+			const repo = makeTmpRepo([]);
+			const hooks = await new GerritDataSource(fakeGit('.git')).getHookStatus(repo);
+			expect(hooks.error).toBeNull();
+			expect(hooks.hooks.every((hook) => !hook.installed)).toBe(true);
+		});
+		it('returns an error when the git-dir cannot be resolved', async () => {
+			const failing = {
+				gitOutput: () => Promise.reject(new Error('not a repo')),
+				runGitCommand: () => Promise.resolve(null),
+				runGitCommandWithInput: () => Promise.resolve(null)
+			};
+			const hooks = await new GerritDataSource(failing).getHookStatus('/repo');
+			expect(typeof hooks.error).toBe('string');
+			expect(hooks.hooks).toEqual([]);
+		});
+	});
+
+	describe('installHook', () => {
+		const NL = String.fromCharCode(10);
+		const HOOK_SCRIPT = '#!/bin/sh' + NL + '# Gerrit commit-msg hook' + NL + 'exit 0' + NL;
+		let server!: http.Server, origin: string = '';
+		/** A fake GitRunner answering `remote get-url` and `rev-parse --git-dir`. */
+		const fakeGit = (remoteUrl: string, gitDir: string) => ({
+			gitOutput: (args: string[], _repo: string, resolve: { (stdout: string): any }) => {
+				if (args[0] === 'remote' && args[1] === 'get-url') return Promise.resolve(resolve(remoteUrl));
+				if (args[0] === 'rev-parse') return Promise.resolve(resolve(gitDir));
+				return Promise.resolve(resolve(''));
+			},
+			runGitCommand: () => Promise.resolve(null),
+			runGitCommandWithInput: () => Promise.resolve(null)
+		});
+		/** Serve the commit-msg hook script for every request (optionally with a different status/body). */
+		const serve = (status: number, body: string) => {
+			server = http.createServer((_req, res) => { res.statusCode = status; res.end(body); });
+			return new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => {
+				origin = 'http://127.0.0.1:' + (<any>server.address()).port;
+				resolve();
+			}));
+		};
+
+		beforeAll(() => serve(200, HOOK_SCRIPT));
+		afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+		it('downloads and installs the commit-msg hook from the Gerrit server', async () => {
+			const repo = makeTmpRepo([]);
+			const result = await new GerritDataSource(fakeGit(origin + '/team/repo.git', '.git')).installHook(repo, 'origin', 'commit-msg');
+			expect(result).toEqual({ error: null, installed: true });
+			expect(fs.readFileSync(path.join(repo, '.git', 'hooks', 'commit-msg'), 'utf8')).toBe(HOOK_SCRIPT);
+		});
+		it('reports an already up-to-date hook without rewriting it', async () => {
+			const repo = makeTmpRepo([]);
+			const gerrit = new GerritDataSource(fakeGit(origin + '/team/repo.git', '.git'));
+			expect(await gerrit.installHook(repo, 'origin', 'commit-msg')).toEqual({ error: null, installed: true });
+			expect(await gerrit.installHook(repo, 'origin', 'commit-msg')).toEqual({ error: null, installed: false });
+		});
+		it('derives the server origin from an ssh remote URL', async () => {
+			const repo = makeTmpRepo([]);
+			const result = await new GerritDataSource(fakeGit('ssh://gerrit-user@127.0.0.1:29418/team/repo', '.git')).installHook(repo, 'origin', 'commit-msg');
+			// Port 29418 isn't the HTTP server, so the download fails - but only AFTER the ssh URL was
+			// converted to an http origin (i.e. the error must be a download error, not a URL error)
+			expect(typeof result.error).toBe('string');
+			expect(result.error).toContain('Unable to download');
+		});
+		it('rejects hooks Gerrit does not serve', async () => {
+			const result = await new GerritDataSource(fakeGit(origin + '/team/repo.git', '.git')).installHook('/repo', 'origin', 'pre-commit');
+			expect(result.installed).toBe(false);
+			expect(result.error).toContain('cannot be downloaded');
+		});
+		it('rejects remote URLs from which no Gerrit server can be derived', async () => {
+			const result = await new GerritDataSource(fakeGit('git@localhost:repo', '.git')).installHook('/repo', 'origin', 'commit-msg');
+			expect(result.installed).toBe(false);
+			expect(result.error).toContain('Unable to derive the Gerrit server URL');
+		});
+		it('rejects downloaded content that is not a hook script', async () => {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await serve(200, '<html>Not Found</html>');
+			const result = await new GerritDataSource(fakeGit(origin + '/team/repo.git', '.git')).installHook(makeTmpRepo([]), 'origin', 'commit-msg');
+			expect(result.installed).toBe(false);
+			expect(result.error).toContain('not a valid hook script');
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await serve(200, HOOK_SCRIPT);
+		});
+		it('reports HTTP errors of the download', async () => {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await serve(404, '');
+			const result = await new GerritDataSource(fakeGit(origin + '/team/repo.git', '.git')).installHook(makeTmpRepo([]), 'origin', 'commit-msg');
+			expect(result.installed).toBe(false);
+			expect(result.error).toContain('HTTP 404');
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await serve(200, HOOK_SCRIPT);
+		});
+	});
 });
+

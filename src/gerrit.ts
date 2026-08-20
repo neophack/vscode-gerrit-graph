@@ -1,4 +1,9 @@
 import { createHash } from 'crypto';
+import * as http from 'http';
+import * as https from 'https';
+import * as fs from 'fs';
+import * as path from 'path';
+import { resolve as resolveUrl } from 'url';
 import { ErrorInfo, GerritChangeEvent, GerritChangeState, GerritChangeStatus, GerritPatchsetsMode } from './types';
 import { evalPromises } from './utils';
 
@@ -25,6 +30,47 @@ const LABEL_FOOTER_REGEX = /^Label: ([A-Za-z0-9-]+)\s*=\s*([+-]?\d+)\s*$/gm;
 const META_PARSE_CONCURRENCY = 8;
 /** The maximum number of parsed NoteDb meta states retained in the in-memory cache (LRU). */
 const META_CACHE_LIMIT = 500;
+
+/** The Git hooks whose status is shown in the Hooks dialog. */
+const TRACKED_HOOKS = ['pre-commit', 'commit-msg', 'post-commit'];
+/** The hooks Gerrit serves under <origin>/tools/hooks/. */
+const GERRIT_HOOK_FILES = ['commit-msg'];
+/** The maximum number of HTTP redirects followed when downloading a file. */
+const HTTP_REDIRECT_LIMIT = 3;
+
+/**
+ * Download a file over HTTP(S), following up to HTTP_REDIRECT_LIMIT redirects.
+ * @param url The URL to download.
+ * @param redirectsRemaining The remaining redirect budget.
+ * @returns The file contents.
+ */
+function downloadFile(url: string, redirectsRemaining: number): Promise<Buffer> {
+	return new Promise<Buffer>((resolve, reject) => {
+		const request = (/^https:/i.test(url) ? https : http).get(url, (response: http.IncomingMessage) => {
+			const status = response.statusCode === undefined ? 0 : response.statusCode;
+			if (status >= 300 && status < 400 && response.headers.location !== undefined) {
+				response.resume(); // discard the body of the redirect response
+				if (redirectsRemaining <= 0) {
+					reject('too many redirects');
+				} else {
+					downloadFile(resolveUrl(response.headers.location, url), redirectsRemaining - 1).then(resolve, reject);
+				}
+				return;
+			}
+			if (status < 200 || status >= 300) {
+				response.resume();
+				reject('HTTP ' + status);
+				return;
+			}
+			const chunks: Buffer[] = [];
+			response.on('data', (chunk: Buffer) => chunks.push(chunk));
+			response.on('end', () => resolve(Buffer.concat(chunks)));
+			response.on('error', reject);
+		});
+		request.on('error', reject);
+		request.setTimeout(DEFAULT_REMOTE_TIMEOUT_MS, () => request.destroy(new Error('request timed out')));
+	});
+}
 /** The default timeout of remote Gerrit operations (ls-remote / fetch), in milliseconds (<= 0 => disabled). */
 const DEFAULT_REMOTE_TIMEOUT_MS = 60000;
 // "Change has been successfully merged by <name>" / "cherry-picked as <hash> by <name>" - the
@@ -529,6 +575,71 @@ export class GerritDataSource {
 		if (refs.length === 0) return { error: null, cleared: 0 };
 		const error = await this.git.runGitCommandWithInput(['update-ref', '--stdin'], repo, refs.map((ref) => 'delete ' + ref).join('\n') + '\n');
 		return { error: error, cleared: error === null ? refs.length : 0 };
+	}
+
+	/**
+	 * Get the status of the tracked Git hooks of a repository.
+	 * @returns The status of each tracked hook, or an error.
+	 */
+	public async getHookStatus(repo: string): Promise<{ error: ErrorInfo; hooks: { name: string; installed: boolean; installable: boolean }[] }> {
+		const hooksDir = await this.getHooksDir(repo);
+		if (hooksDir === null) return { error: 'Unable to determine the Git directory of the repository.', hooks: [] };
+		return {
+			error: null,
+			hooks: TRACKED_HOOKS.map((name) => ({ name: name, installed: fs.existsSync(path.join(hooksDir, name)), installable: GERRIT_HOOK_FILES.includes(name) }))
+		};
+	}
+
+	/**
+	 * Download a Git hook from the Gerrit server of the remote and install it into the repository's
+	 * hooks directory (<git-dir>/hooks/<hook>).
+	 * @param hook The hook file name to install (must be one of GERRIT_HOOK_FILES).
+	 * @returns An error, or whether the hook was (re-)installed. TRUE => installed; FALSE => an identical hook was already present.
+	 */
+	public async installHook(repo: string, remote: string, hook: string): Promise<{ error: ErrorInfo; installed: boolean }> {
+		if (!GERRIT_HOOK_FILES.includes(hook)) return { error: 'The hook "' + hook + '" cannot be downloaded from the Gerrit server.', installed: false };
+
+		// Derive the Gerrit server's base URL (e.g. "http://gerrit.example.com") from the remote's URL
+		const origin = await this.git.gitOutput(['remote', 'get-url', remote], repo, (stdout) => {
+			let url = stdout.trim();
+			const sshMatch = /^(?:ssh:\/\/)?([^\/:]+)(?::29418)?\/(.+?)(?:\.git)?$/i.exec(url);
+			if (sshMatch !== null) url = 'http://' + sshMatch[1];
+			const match = /^(https?:\/\/[^\/]+)/i.exec(url);
+			return match !== null ? match[1] : null;
+		}).catch(() => null);
+		if (origin === null) return { error: 'Unable to derive the Gerrit server URL from the remote "' + remote + '" (only http(s) and ssh remotes are supported).', installed: false };
+
+		const hookUrl = origin + '/tools/hooks/' + hook;
+		let content: string;
+		try {
+			content = (await downloadFile(hookUrl, HTTP_REDIRECT_LIMIT)).toString('utf8');
+		} catch (errorMessage) {
+			return { error: 'Unable to download the ' + hook + ' hook from ' + hookUrl + ': ' + errorMessage, installed: false };
+		}
+		if (!/^#!/.test(content.replace(/^\s+/, ''))) return { error: 'The file downloaded from ' + hookUrl + ' is not a valid hook script.', installed: false };
+
+		const hooksDir = await this.getHooksDir(repo);
+		if (hooksDir === null) return { error: 'Unable to determine the Git directory of the repository.', installed: false };
+
+		const hookPath = path.join(hooksDir, hook);
+		try {
+			const existing = fs.existsSync(hookPath) ? fs.readFileSync(hookPath, 'utf8') : null;
+			if (existing === content) return { error: null, installed: false }; // an identical hook is already installed
+			if (!fs.existsSync(hooksDir)) fs.mkdirSync(hooksDir);
+			fs.writeFileSync(hookPath, content, { mode: 0o755 });
+		} catch (errorMessage) {
+			return { error: 'Unable to write the ' + hook + ' hook to ' + hookPath + ': ' + errorMessage, installed: false };
+		}
+		return { error: null, installed: true };
+	}
+
+	/**
+	 * Resolve the hooks directory of a repository (<git-dir>/hooks).
+	 * @returns The absolute hooks directory path, or NULL if it couldn't be determined.
+	 */
+	private async getHooksDir(repo: string): Promise<string | null> {
+		// git rev-parse --git-dir may return a path relative to the repository
+		return this.git.gitOutput(['rev-parse', '--git-dir'], repo, (stdout) => path.resolve(repo, stdout.trim(), 'hooks')).catch(() => null);
 	}
 
 	/**

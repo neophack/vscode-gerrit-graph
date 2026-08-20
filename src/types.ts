@@ -255,7 +255,14 @@ export interface GerritConfig {
 	showPushButton: boolean;
 }
 
+export interface PinnedCommit {
+	hash: string;
+	summary: string;
+}
+
 export interface GitRepoState {
+	pinnedBranches: string[];
+	pinnedCommits: PinnedCommit[];
 	cdvDivider: number;
 	cdvHeight: number;
 	columnWidths: ColumnWidth[] | null;
@@ -435,9 +442,10 @@ export interface ContextMenuActionsVisibility {
 		readonly merge: boolean;
 		readonly rebase: boolean;
 		readonly reset: boolean;
-		readonly undo: boolean;
-		readonly editMessage: boolean;
-		readonly copyHash: boolean;
+			readonly undo: boolean;
+			readonly editMessage: boolean;
+			readonly bisect: boolean;
+			readonly copyHash: boolean;
 		readonly copySubject: boolean;
 	};
 	readonly commitDetailsViewFile: {
@@ -986,6 +994,30 @@ export interface ResponseGerritClearRefs extends ResponseWithErrorInfo {
 	readonly cleared: number; // the number of local Gerrit change refs deleted
 }
 
+export interface GerritHookStatus {
+	readonly name: string; // the hook file name, e.g. "commit-msg"
+	readonly installed: boolean; // TRUE => the hook file exists in <git-dir>/hooks/
+	readonly installable: boolean; // TRUE => the hook can be downloaded from the Gerrit server (commit-msg)
+}
+
+export interface RequestGerritGetHookStatus extends RepoRequest {
+	readonly command: 'gerritGetHookStatus';
+}
+export interface ResponseGerritGetHookStatus extends ResponseWithErrorInfo {
+	readonly command: 'gerritGetHookStatus';
+	readonly hooks: GerritHookStatus[]; // the status of each tracked Git hook
+}
+
+export interface RequestGerritInstallHook extends RepoRequest {
+	readonly command: 'gerritInstallHook';
+	readonly hook: string; // the hook file name to install (currently only "commit-msg")
+}
+export interface ResponseGerritInstallHook extends ResponseWithErrorInfo {
+	readonly command: 'gerritInstallHook';
+	readonly hook: string; // the hook file name that was installed
+	readonly installed: boolean; // TRUE => the hook was downloaded and installed; FALSE => an identical hook was already installed
+}
+
 export interface RequestGerritAutosquash extends RepoRequest {
 	readonly command: 'gerritAutosquash';
 	readonly commitHash: string;
@@ -1079,6 +1111,43 @@ export interface ResponseLoadRepoInfo extends ResponseWithErrorInfo {
 	readonly remotes: ReadonlyArray<string>;
 	readonly stashes: ReadonlyArray<GitStash>;
 	readonly isRepo: boolean;
+	readonly bisect: BisectInfo | null; // the current Git bisect state, NULL => not requested / not a repo
+}
+
+/* Git Bisect Types */
+
+export interface BisectInfo {
+	readonly inProgress: boolean; // TRUE => a Git bisect session is in progress
+	readonly goodHashes: string[]; // the hashes marked as good
+	readonly badHashes: string[]; // the hashes marked as bad
+	readonly firstBadCommit: string | null; // the first bad commit found by a converged bisect, NULL => not converged
+}
+
+export interface RequestBisectStart extends RepoRequest {
+	readonly command: 'bisectStart';
+	readonly badHash: string; // the hash of the bad commit
+	readonly goodHash: string | null; // the hash of the good commit, NULL => none
+}
+export interface ResponseBisectStart extends ResponseWithErrorInfo {
+	readonly command: 'bisectStart';
+	readonly firstBadCommit: string | null;
+}
+
+export interface RequestBisectMark extends RepoRequest {
+	readonly command: 'bisectMark';
+	readonly mark: 'good' | 'bad' | 'skip';
+	readonly commitHash: string | null; // the hash to mark, NULL => the current bisect commit
+}
+export interface ResponseBisectMark extends ResponseWithErrorInfo {
+	readonly command: 'bisectMark';
+	readonly firstBadCommit: string | null;
+}
+
+export interface RequestBisectReset extends RepoRequest {
+	readonly command: 'bisectReset';
+}
+export interface ResponseBisectReset extends ResponseWithErrorInfo {
+	readonly command: 'bisectReset';
 }
 
 export interface RequestLoadRepos extends BaseMessage {
@@ -1399,6 +1468,9 @@ export type RequestMessage =
 	RequestAddRemote
 	| RequestAddTag
 	| RequestApplyStash
+	| RequestBisectStart
+	| RequestBisectMark
+	| RequestBisectReset
 	| RequestBranchFromStash
 	| RequestCheckoutBranch
 	| RequestCheckoutCommit
@@ -1430,6 +1502,8 @@ export type RequestMessage =
 	| RequestGerritAmendChangeId
 	| RequestGerritAutosquash
 	| RequestGerritClearRefs
+	| RequestGerritGetHookStatus
+	| RequestGerritInstallHook
 	| RequestGerritFetchChange
 	| RequestGerritSaveFetchConfig
 	| RequestGerritSubmitReview
@@ -1471,6 +1545,9 @@ export type ResponseMessage =
 	ResponseAddRemote
 	| ResponseAddTag
 	| ResponseApplyStash
+	| ResponseBisectStart
+	| ResponseBisectMark
+	| ResponseBisectReset
 	| ResponseBranchFromStash
 	| ResponseCheckoutBranch
 	| ResponseCheckoutCommit
@@ -1501,6 +1578,8 @@ export type ResponseMessage =
 	| ResponseGerritAutosquash
 	| ResponseGerritAmendChangeId
 	| ResponseGerritClearRefs
+	| ResponseGerritGetHookStatus
+	| ResponseGerritInstallHook
 	| ResponseGerritFetchChange
 	| ResponseGerritSaveFetchConfig
 	| ResponseGerritSubmitReview

@@ -6167,6 +6167,165 @@ describe('DataSource', () => {
 		});
 	});
 
+	describe('bisectStart', () => {
+		const badHash = '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', goodHash = '2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a';
+
+		it('Should start a bisect session marking the bad and good commits', async () => {
+			// Setup
+			mockGitSuccessOnce();
+			mockGitSuccessOnce();
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.bisectStart('/path/to/repo', badHash, goodHash);
+
+			// Assert
+			expect(result.error).toBe(null);
+			expect(result.firstBadCommit).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'start'], expect.objectContaining({ cwd: '/path/to/repo' }));
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'bad', badHash], expect.anything());
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'good', goodHash], expect.anything());
+		});
+
+		it('Should start a bisect session marking only the bad commit', async () => {
+			// Setup
+			mockGitSuccessOnce();
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.bisectStart('/path/to/repo', badHash, null);
+
+			// Assert
+			expect(result.error).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'start'], expect.anything());
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'bad', badHash], expect.anything());
+			expect(spyOnSpawn).not.toBeCalledWith('/path/to/git', expect.arrayContaining(['good']), expect.anything());
+		});
+
+		it('Should return an error message thrown by git bisect start', async () => {
+			// Setup
+			mockGitThrowingErrorOnce();
+
+			// Run
+			const result = await dataSource.bisectStart('/path/to/repo', badHash, goodHash);
+
+			// Assert
+			expect(result.error).toBe('error message');
+			expect(result.firstBadCommit).toBe(null);
+		});
+	});
+
+	describe('bisectMark', () => {
+		const commitHash = '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b';
+
+		it('Should mark the current commit as bad when no hash is provided', async () => {
+			// Setup
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.bisectMark('/path/to/repo', 'bad', null);
+
+			// Assert
+			expect(result.error).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'bad'], expect.objectContaining({ cwd: '/path/to/repo' }));
+		});
+
+		it('Should mark the provided commit as good', async () => {
+			// Setup
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.bisectMark('/path/to/repo', 'good', commitHash);
+
+			// Assert
+			expect(result.error).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'good', commitHash], expect.anything());
+		});
+
+		it('Should parse the first bad commit from the bisect output', async () => {
+			// Setup
+			mockGitSuccessOnce('Bisecting: 2 revisions left to test after this (roughly 1 step)\n' + commitHash + ' is the first bad commit\n');
+
+			// Run
+			const result = await dataSource.bisectMark('/path/to/repo', 'bad', null);
+
+			// Assert
+			expect(result.error).toBe(null);
+			expect(result.firstBadCommit).toBe(commitHash);
+		});
+
+		it('Should return an error message thrown by git', async () => {
+			// Setup
+			mockGitThrowingErrorOnce();
+
+			// Run
+			const result = await dataSource.bisectMark('/path/to/repo', 'skip', null);
+
+			// Assert
+			expect(result.error).toBe('error message');
+			expect(result.firstBadCommit).toBe(null);
+		});
+	});
+
+	describe('bisectReset', () => {
+		it('Should end the bisect session', async () => {
+			// Setup
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.bisectReset('/path/to/repo');
+
+			// Assert
+			expect(result).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['bisect', 'reset'], expect.objectContaining({ cwd: '/path/to/repo' }));
+		});
+
+		it('Should return an error message thrown by git', async () => {
+			// Setup
+			mockGitThrowingErrorOnce();
+
+			// Run
+			const result = await dataSource.bisectReset('/path/to/repo');
+
+			// Assert
+			expect(result).toBe('error message');
+		});
+	});
+
+	describe('getBisectInfo', () => {
+		it('Should parse the bisect log of an in-progress session', async () => {
+			// Setup
+			mockGitSuccessOnce('git bisect start\n' +
+				'# status: waiting for both good and bad commits\n' +
+				'# good: [2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a] Good commit\n' +
+				'git bisect good 2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a\n' +
+				'# bad: [1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b] Bad commit\n' +
+				'git bisect bad 1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b\n');
+
+			// Run
+			const result = await dataSource.getBisectInfo('/path/to/repo');
+
+			// Assert
+			expect(result).toStrictEqual({
+				inProgress: true,
+				goodHashes: ['2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a'],
+				badHashes: ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b'],
+				firstBadCommit: null
+			});
+		});
+
+		it('Should report no bisect in progress when git bisect log fails', async () => {
+			// Setup
+			mockGitThrowingErrorOnce();
+
+			// Run
+			const result = await dataSource.getBisectInfo('/path/to/repo');
+
+			// Assert
+			expect(result).toStrictEqual({ inProgress: false, goodHashes: [], badHashes: [], firstBadCommit: null });
+		});
+	});
+
 	describe('cherrypickCommit', () => {
 		it('Should cherrypick a commit (with a single parent)', async () => {
 			// Setup

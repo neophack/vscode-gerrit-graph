@@ -724,8 +724,8 @@ class SettingsWidget {
 		}
 		providerOptions.sort((a, b) => a.name.localeCompare(b.name));
 
-		let sourceRemoteOptions = this.config.remotes.map((remote, index) => ({ name: remote.name, value: index.toString() }));
-		let destRemoteOptions = sourceRemoteOptions.map((option) => option);
+		let sourceRemoteOptions = this.config.remotes.map((remote: { name: string }, index: number) => ({ name: remote.name, value: index.toString() }));
+		let destRemoteOptions = sourceRemoteOptions.map((option: { name: string, value: string }) => option);
 		destRemoteOptions.push({ name: 'Not a remote', value: '-1' });
 
 		dialog.showForm('Configure "Pull Request Creation" Integration (Step&nbsp;1/2)', [

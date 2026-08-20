@@ -288,7 +288,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true,
+					editMessage: true, bisect: true,
 					copyHash: true,
 					copySubject: true
 				},
@@ -373,7 +373,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true,
+					editMessage: true, bisect: true,
 					copyHash: true,
 					copySubject: true
 				},
@@ -476,7 +476,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true,
+					editMessage: true, bisect: true,
 					copyHash: true,
 					copySubject: true
 				},

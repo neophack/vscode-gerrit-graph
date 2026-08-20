@@ -158,6 +158,27 @@ class Dropdown {
 	}
 
 	/**
+	 * Unselect every option and select only the value with the specified value.
+	 * If the value isn't an option of this dropdown, nothing changes.
+	 * @param value The value of the only option to select.
+	 */
+	public selectOnlyOption(value: string) {
+		const optionIndex = this.options.findIndex((option) => value === option.value);
+		if (optionIndex === -1 || (this.optionsSelected.length === 1 && this.optionsSelected[optionIndex])) return;
+
+		this.optionsSelected = this.options.map((_, i) => i === optionIndex);
+		this.lastSelected = optionIndex;
+
+		// A change has occurred, re-render the dropdown options
+		const menuScroll = this.menuElem.scrollTop;
+		this.render();
+		if (this.dropdownVisible) {
+			this.menuElem.scroll(0, menuScroll);
+		}
+		this.changeCallback(this.getSelectedOptions(false));
+	}
+
+	/**
 	 * Unselect a specific value in the dropdown.
 	 * @param value The value to unselect.
 	 */

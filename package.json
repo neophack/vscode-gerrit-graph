@@ -1,7 +1,7 @@
 {
 	"name": "review-graph",
 	"displayName": "Review Graph",
-	"version": "1.38.2",
+	"version": "1.38.3",
 	"publisher": "aucneon",
 	"engine": {
 		"node": "18.17.1"
@@ -112,6 +112,18 @@
 				"title": "Open File",
 				"icon": "$(go-to-file)",
 				"enablement": "isInDiffEditor && resourceScheme == review-graph && review-graph:codiconsSupported"
+			},
+			{
+				"category": "Review Graph",
+				"command": "review-graph.amendLastCommit",
+				"title": "Amend Last Commit",
+				"icon": "$(edit)"
+			},
+			{
+				"category": "Review Graph",
+				"command": "review-graph.resetCurrentBranchToRemote",
+				"title": "Reset Current Branch to Remote (Soft)",
+				"icon": "$(discard)"
 			}
 		],
 		"configuration": {
@@ -257,6 +269,10 @@
 								"reset": {
 									"type": "boolean",
 									"title": "Reset current branch to this Commit..."
+								},
+								"bisect": {
+									"type": "boolean",
+									"title": "Git Bisect (Mark as Good/Bad, Start, End)"
 								},
 								"copyHash": {
 									"type": "boolean",
@@ -1672,6 +1688,16 @@
 					"when": "scmProvider == git && config.review-graph.sourceCodeProviderIntegrationLocation == 'More Actions'",
 					"command": "review-graph.view",
 					"group": "inline"
+				},
+				{
+					"when": "scmProvider == git",
+					"command": "review-graph.amendLastCommit",
+					"group": "review-graph@1"
+				},
+				{
+					"when": "scmProvider == git",
+					"command": "review-graph.resetCurrentBranchToRemote",
+					"group": "review-graph@2"
 				}
 			]
 		}

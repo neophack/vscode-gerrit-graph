@@ -59,6 +59,8 @@ export class CommandManager extends Disposable {
 		this.registerCommand('review-graph.version', () => this.version());
 		this.registerCommand('review-graph.searchCommits', () => this.searchCommits());
 		this.registerCommand('review-graph.openFile', (arg) => this.openFile(arg));
+		this.registerCommand('review-graph.amendLastCommit', (arg) => this.amendLastCommit(arg));
+		this.registerCommand('review-graph.resetCurrentBranchToRemote', (arg) => this.resetCurrentBranchToRemote(arg));
 
 		this.registerDisposable(
 			onDidChangeGitExecutable((gitExecutable) => {
@@ -112,6 +114,94 @@ export class CommandManager extends Disposable {
 
 
 	/* Commands */
+
+	/**
+	 * Resolve the repository a command should operate on.
+	 * Prefers a repository provided in the command argument (e.g. from the Source Control view),
+	 * then the repository containing the active text editor document, and finally asks the user.
+	 * @param arg The argument passed to the command.
+	 * @returns The repository path, or NULL if it could not be determined or the user cancelled.
+	 */
+	private async getRepoFromCommandArg(arg: any): Promise<string | null> {
+		if (typeof arg === 'object' && arg && arg.rootUri) {
+			const repoPath = getPathFromUri(arg.rootUri);
+			return await this.repoManager.getKnownRepo(repoPath) || this.repoManager.getRepoContainingFile(repoPath);
+		}
+
+		if (vscode.window.activeTextEditor) {
+			const repo = this.repoManager.getRepoContainingFile(getPathFromUri(vscode.window.activeTextEditor.document.uri));
+			if (repo !== null) return repo;
+		}
+
+		const repos = this.repoManager.getRepos();
+		const repoPaths = getSortedRepositoryPaths(repos, getConfig().repoDropdownOrder);
+		if (repoPaths.length === 0) return null;
+		if (repoPaths.length === 1) return repoPaths[0];
+
+		const items: vscode.QuickPickItem[] = repoPaths.map((path) => ({
+			label: repos[path].name || getRepoName(path),
+			description: path
+		}));
+		const item = await vscode.window.showQuickPick(items, { canPickMany: false, placeHolder: 'Select the repository to run the command on:' });
+		return item && item.description !== undefined ? item.description : null;
+	}
+
+	/**
+	 * The method run when the `review-graph.amendLastCommit` command is invoked.
+	 * Amends the last commit with the currently staged changes, keeping the existing commit message.
+	 * @param arg An optional argument passed to the command (when invoked from the Visual Studio Code Source Control View).
+	 */
+	private async amendLastCommit(arg: any) {
+		if (this.gitExecutable === null) {
+			showErrorMessage(UNABLE_TO_FIND_GIT_MSG);
+			return;
+		}
+
+		const repo = await this.getRepoFromCommandArg(arg);
+		if (repo === null) return;
+
+		const errorInfo = await this.dataSource.amendLastCommit(repo);
+		if (errorInfo !== null) {
+			showErrorMessage('Unable to Amend Last Commit: ' + errorInfo);
+		} else {
+			showInformationMessage('Amended the last commit in "' + (this.repoManager.getRepos()[repo].name || getRepoName(repo)) + '".');
+		}
+	}
+
+	/**
+	 * The method run when the `review-graph.resetCurrentBranchToRemote` command is invoked.
+	 * Soft resets the current branch to its upstream (remote tracking) branch, keeping all changes staged.
+	 * @param arg An optional argument passed to the command (when invoked from the Visual Studio Code Source Control View).
+	 */
+	private async resetCurrentBranchToRemote(arg: any) {
+		if (this.gitExecutable === null) {
+			showErrorMessage(UNABLE_TO_FIND_GIT_MSG);
+			return;
+		}
+
+		const repo = await this.getRepoFromCommandArg(arg);
+		if (repo === null) return;
+
+		const upstream = await this.dataSource.getCurrentBranchUpstream(repo);
+		if (upstream === null) {
+			showErrorMessage('Unable to Reset to Remote: The current branch has no upstream (remote tracking) branch.');
+			return;
+		}
+
+		const confirmed = await vscode.window.showWarningMessage(
+			'Reset the current branch to "' + upstream + '"?\n\nAll commits ahead of the remote will be undone (soft reset), and their changes will be kept staged.',
+			{ modal: true },
+			'Reset to Remote'
+		);
+		if (confirmed !== 'Reset to Remote') return;
+
+		const errorInfo = await this.dataSource.resetCurrentBranchToRemote(repo);
+		if (errorInfo !== null) {
+			showErrorMessage('Unable to Reset Current Branch to Remote: ' + errorInfo);
+		} else {
+			showInformationMessage('Reset the current branch to "' + upstream + '" (soft reset).');
+		}
+	}
 
 	/**
 	 * The method run when the `review-graph.view` command is invoked.

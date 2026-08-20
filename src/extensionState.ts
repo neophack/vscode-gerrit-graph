@@ -18,6 +18,8 @@ const REPO_STATES = 'repoStates';
 const WORKSPACE_VIEW_STATE = 'workspaceViewState';
 
 export const DEFAULT_REPO_STATE: GitRepoState = {
+	pinnedBranches: [],
+	pinnedCommits: [],
 	cdvDivider: 0.5,
 	cdvHeight: 250,
 	columnWidths: null,

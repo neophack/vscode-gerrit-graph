@@ -836,6 +836,114 @@ describe('GitGraphView', () => {
 			});
 		});
 
+		describe('bisect', () => {
+			it('Should start a bisect session', async () => {
+				// Setup
+				const spyOnBisectStart = jest.spyOn(dataSource, 'bisectStart');
+				spyOnBisectStart.mockResolvedValueOnce({ error: null, firstBadCommit: null });
+
+				// Run
+				onDidReceiveMessage({
+					command: 'bisectStart',
+					repo: '/path/to/repo',
+					badHash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
+					goodHash: '2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a'
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnBisectStart).toHaveBeenCalledWith('/path/to/repo', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', '2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b1a');
+					expect(messages).toStrictEqual([
+						{ command: 'bisectStart', error: null, firstBadCommit: null }
+					]);
+				});
+			});
+
+			it('Should forward the first bad commit when the bisect converges immediately', async () => {
+				// Setup
+				const spyOnBisectStart = jest.spyOn(dataSource, 'bisectStart');
+				spyOnBisectStart.mockResolvedValueOnce({ error: null, firstBadCommit: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b' });
+
+				// Run
+				onDidReceiveMessage({
+					command: 'bisectStart',
+					repo: '/path/to/repo',
+					badHash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b',
+					goodHash: null
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(messages).toStrictEqual([
+						{ command: 'bisectStart', error: null, firstBadCommit: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b' }
+					]);
+				});
+			});
+
+			it('Should mark a commit for the bisect session', async () => {
+				// Setup
+				const spyOnBisectMark = jest.spyOn(dataSource, 'bisectMark');
+				spyOnBisectMark.mockResolvedValueOnce({ error: null, firstBadCommit: null });
+
+				// Run
+				onDidReceiveMessage({
+					command: 'bisectMark',
+					repo: '/path/to/repo',
+					mark: 'good',
+					commitHash: null
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnBisectMark).toHaveBeenCalledWith('/path/to/repo', 'good', null);
+					expect(messages).toStrictEqual([
+						{ command: 'bisectMark', error: null, firstBadCommit: null }
+					]);
+				});
+			});
+
+			it('Should return the error message thrown when marking a commit', async () => {
+				// Setup
+				const spyOnBisectMark = jest.spyOn(dataSource, 'bisectMark');
+				spyOnBisectMark.mockResolvedValueOnce({ error: 'error message', firstBadCommit: null });
+
+				// Run
+				onDidReceiveMessage({
+					command: 'bisectMark',
+					repo: '/path/to/repo',
+					mark: 'bad',
+					commitHash: '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b'
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(messages).toStrictEqual([
+						{ command: 'bisectMark', error: 'error message', firstBadCommit: null }
+					]);
+				});
+			});
+
+			it('Should end a bisect session', async () => {
+				// Setup
+				const spyOnBisectReset = jest.spyOn(dataSource, 'bisectReset');
+				spyOnBisectReset.mockResolvedValueOnce(null);
+
+				// Run
+				onDidReceiveMessage({
+					command: 'bisectReset',
+					repo: '/path/to/repo'
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnBisectReset).toHaveBeenCalledWith('/path/to/repo');
+					expect(messages).toStrictEqual([
+						{ command: 'bisectReset', error: null }
+					]);
+				});
+			});
+		});
+
 		describe('cherrypickCommit', () => {
 			it('Should cherrypick a commit', async () => {
 				// Setup
@@ -2243,6 +2351,62 @@ describe('GitGraphView', () => {
 			});
 		});
 
+		describe('gerritGetHookStatus', () => {
+			it('Should respond with the status of the tracked Git hooks', async () => {
+				const spyOnGetHookStatus = jest.fn().mockResolvedValueOnce({
+					error: null,
+					hooks: [
+						{ name: 'pre-commit', installed: true, installable: false },
+						{ name: 'commit-msg', installed: false, installable: true },
+						{ name: 'post-commit', installed: false, installable: false }
+					]
+				});
+				const previousGerrit = (<any>dataSource).gerrit;
+				(<any>dataSource).gerrit = { getHookStatus: spyOnGetHookStatus };
+
+				onDidReceiveMessage({ command: 'gerritGetHookStatus', repo: '/path/to/repo' });
+
+				await waitForExpect(() => {
+					expect(spyOnGetHookStatus).toHaveBeenCalledWith('/path/to/repo');
+					expect(messages).toStrictEqual([
+						{
+							command: 'gerritGetHookStatus',
+							error: null,
+							hooks: [
+								{ name: 'pre-commit', installed: true, installable: false },
+								{ name: 'commit-msg', installed: false, installable: true },
+								{ name: 'post-commit', installed: false, installable: false }
+							]
+						}
+					]);
+				});
+				(<any>dataSource).gerrit = previousGerrit;
+			});
+		});
+
+		describe('gerritInstallHook', () => {
+			it('Should install the requested hook of the configured remote and respond with the result', async () => {
+				const spyOnInstallHook = jest.fn().mockResolvedValueOnce({ error: null, installed: true });
+				const previousGerrit = (<any>dataSource).gerrit;
+				(<any>dataSource).gerrit = { installHook: spyOnInstallHook };
+
+				onDidReceiveMessage({ command: 'gerritInstallHook', repo: '/path/to/repo', hook: 'commit-msg' });
+
+				await waitForExpect(() => {
+					expect(spyOnInstallHook).toHaveBeenCalledWith('/path/to/repo', 'origin', 'commit-msg');
+					expect(messages).toStrictEqual([
+						{
+							command: 'gerritInstallHook',
+							hook: 'commit-msg',
+							error: null,
+							installed: true
+						}
+					]);
+				});
+				(<any>dataSource).gerrit = previousGerrit;
+			});
+		});
+
 		describe('gerritAmendChangeId', () => {
 			let spyOnGitOutput: jest.SpyInstance, spyOnRunGitCommand: jest.SpyInstance;
 			const TREE_HASH = '0123456789abcdef0123456789abcdef01234567', PARENT_HASH = 'fedcba9876543210fedcba9876543210fedcba98';
@@ -2896,6 +3060,8 @@ describe('GitGraphView', () => {
 			});
 		});
 
+		const BISECT_INFO = { inProgress: false, goodHashes: ['abc123'], badHashes: ['def456'], firstBadCommit: null };
+
 		describe('loadRepoInfo', () => {
 			it('Should get the repository information (initial repo load)', async () => {
 				// Setup
@@ -2908,10 +3074,12 @@ describe('GitGraphView', () => {
 					error: null
 				};
 				const spyOnGetRepoInfo = jest.spyOn(dataSource, 'getRepoInfo');
+				const spyOnGetBisectInfo = jest.spyOn(dataSource, 'getBisectInfo');
 				const spyOnRepoRoot = jest.spyOn(dataSource, 'repoRoot');
 				const spyOnSetLastActiveRepo = jest.spyOn(extensionState, 'setLastActiveRepo');
 				const spyOnRepoFileWatcherStart = jest.spyOn(GitGraphView.currentPanel!['repoFileWatcher'], 'start');
 				spyOnGetRepoInfo.mockResolvedValueOnce(getRepoInfoResolvedValue);
+				spyOnGetBisectInfo.mockResolvedValueOnce(BISECT_INFO);
 				spyOnSetLastActiveRepo.mockImplementationOnce(() => { });
 				spyOnRepoFileWatcherStart.mockImplementationOnce(() => { });
 
@@ -2941,6 +3109,7 @@ describe('GitGraphView', () => {
 							stashes: getRepoInfoResolvedValue.stashes,
 							tags: getRepoInfoResolvedValue.tags,
 							isRepo: true,
+							bisect: BISECT_INFO,
 							error: getRepoInfoResolvedValue.error
 						}
 					]);
@@ -2960,10 +3129,12 @@ describe('GitGraphView', () => {
 					error: null
 				};
 				const spyOnGetRepoInfo = jest.spyOn(dataSource, 'getRepoInfo');
+				const spyOnGetBisectInfo = jest.spyOn(dataSource, 'getBisectInfo');
 				const spyOnRepoRoot = jest.spyOn(dataSource, 'repoRoot');
 				const spyOnSetLastActiveRepo = jest.spyOn(extensionState, 'setLastActiveRepo');
 				const spyOnRepoFileWatcherStart = jest.spyOn(GitGraphView.currentPanel!['repoFileWatcher'], 'start');
 				spyOnGetRepoInfo.mockResolvedValueOnce(getRepoInfoResolvedValue);
+				spyOnGetBisectInfo.mockResolvedValueOnce(BISECT_INFO);
 				GitGraphView.currentPanel!['currentRepo'] = '/path/to/repo';
 
 				// Run
@@ -2992,6 +3163,7 @@ describe('GitGraphView', () => {
 							stashes: getRepoInfoResolvedValue.stashes,
 							tags: getRepoInfoResolvedValue.tags,
 							isRepo: true,
+							bisect: BISECT_INFO,
 							error: getRepoInfoResolvedValue.error
 						}
 					]);
@@ -3011,10 +3183,12 @@ describe('GitGraphView', () => {
 					error: 'error message'
 				};
 				const spyOnGetRepoInfo = jest.spyOn(dataSource, 'getRepoInfo');
+				const spyOnGetBisectInfo = jest.spyOn(dataSource, 'getBisectInfo');
 				const spyOnRepoRoot = jest.spyOn(dataSource, 'repoRoot');
 				const spyOnSetLastActiveRepo = jest.spyOn(extensionState, 'setLastActiveRepo');
 				const spyOnRepoFileWatcherStart = jest.spyOn(GitGraphView.currentPanel!['repoFileWatcher'], 'start');
 				spyOnGetRepoInfo.mockResolvedValueOnce(getRepoInfoResolvedValue);
+				spyOnGetBisectInfo.mockResolvedValueOnce(BISECT_INFO);
 				spyOnRepoRoot.mockResolvedValueOnce('/path/to/repo');
 				GitGraphView.currentPanel!['currentRepo'] = '/path/to/repo';
 
@@ -3044,6 +3218,7 @@ describe('GitGraphView', () => {
 							stashes: getRepoInfoResolvedValue.stashes,
 							tags: getRepoInfoResolvedValue.tags,
 							isRepo: true,
+							bisect: BISECT_INFO,
 							error: getRepoInfoResolvedValue.error
 						}
 					]);
@@ -3063,10 +3238,12 @@ describe('GitGraphView', () => {
 					error: 'error message'
 				};
 				const spyOnGetRepoInfo = jest.spyOn(dataSource, 'getRepoInfo');
+				const spyOnGetBisectInfo = jest.spyOn(dataSource, 'getBisectInfo');
 				const spyOnRepoRoot = jest.spyOn(dataSource, 'repoRoot');
 				const spyOnSetLastActiveRepo = jest.spyOn(extensionState, 'setLastActiveRepo');
 				const spyOnRepoFileWatcherStart = jest.spyOn(GitGraphView.currentPanel!['repoFileWatcher'], 'start');
 				spyOnGetRepoInfo.mockResolvedValueOnce(getRepoInfoResolvedValue);
+				spyOnGetBisectInfo.mockResolvedValueOnce(BISECT_INFO);
 				spyOnRepoRoot.mockResolvedValueOnce(null);
 				GitGraphView.currentPanel!['currentRepo'] = '/path/to/repo';
 
@@ -3096,6 +3273,7 @@ describe('GitGraphView', () => {
 							stashes: getRepoInfoResolvedValue.stashes,
 							tags: getRepoInfoResolvedValue.tags,
 							isRepo: false,
+							bisect: null,
 							error: null
 						}
 					]);

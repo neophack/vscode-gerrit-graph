@@ -275,6 +275,22 @@ export class GitGraphView extends Disposable {
 					error: await this.dataSource.checkoutCommit(msg.repo, msg.commitHash)
 				});
 				break;
+			case 'bisectStart': {
+				const result = await this.dataSource.bisectStart(msg.repo, msg.badHash, msg.goodHash);
+				this.sendMessage({ command: 'bisectStart', error: result.error, firstBadCommit: result.firstBadCommit });
+				break;
+			}
+			case 'bisectMark': {
+				const result = await this.dataSource.bisectMark(msg.repo, msg.mark, msg.commitHash);
+				this.sendMessage({ command: 'bisectMark', error: result.error, firstBadCommit: result.firstBadCommit });
+				break;
+			}
+			case 'bisectReset':
+				this.sendMessage({
+					command: 'bisectReset',
+					error: await this.dataSource.bisectReset(msg.repo)
+				});
+				break;
 			case 'cherrypickCommit':
 				errorInfos = [await this.dataSource.cherrypickCommit(msg.repo, msg.commitHash, msg.parentIndex, msg.recordOrigin, msg.noCommit)];
 				if (errorInfos[0] === null && msg.noCommit) {
@@ -525,6 +541,19 @@ export class GitGraphView extends Disposable {
 					...await this.gerritClearRefs(msg.repo)
 				});
 				break;
+			case 'gerritGetHookStatus':
+				this.sendMessage({
+					command: 'gerritGetHookStatus',
+					...await this.gerritGetHookStatus(msg.repo)
+				});
+				break;
+			case 'gerritInstallHook':
+				this.sendMessage({
+					command: 'gerritInstallHook',
+					hook: msg.hook,
+					...await this.gerritInstallHook(msg.repo, msg.hook)
+				});
+				break;
 			case 'gerritAmendChangeId':
 				this.sendMessage({
 					command: 'gerritAmendChangeId',
@@ -556,7 +585,8 @@ export class GitGraphView extends Disposable {
 					command: 'loadRepoInfo',
 					refreshId: msg.refreshId,
 					...repoInfo,
-					isRepo: isRepo
+					isRepo: isRepo,
+					bisect: isRepo ? await this.dataSource.getBisectInfo(msg.repo) : null
 				});
 				if (msg.repo !== this.currentRepo) {
 					this.currentRepo = msg.repo;
@@ -882,7 +912,12 @@ export class GitGraphView extends Disposable {
 						<div id="gerritAmendBtn" title="Amend a Gerrit Change-Id onto HEAD (only when HEAD has none yet and hasn't been pushed)"></div>
 						<div id="gerritSubmitBtn" title="Submit HEAD for Gerrit Review"></div>
 						<div id="gerritClearRefsBtn" title="Delete all locally downloaded Gerrit change refs (refs/remotes/&lt;remote&gt;/changes/*)"></div>
+						<div id="gerritHooksBtn" title="Show the status of this repository's Git hooks (and install the Gerrit commit-msg hook)"></div>
 					</div>
+					<div id="pinnedControls" style="display:none">
+						<span class="unselectable pinnedRowLabel">Pinned:</span>
+					</div>
+					<div id="bisectBanner" class="bisectBanner" style="display:none"></div>
 				</div>
 				<div id="content">
 					<div id="commitGraph"></div>
@@ -1270,6 +1305,20 @@ export class GitGraphView extends Disposable {
 		const result = await this.dataSource.gerrit.clearLocalChanges(repo, getConfig().gerrit.remote);
 		if (result.error === null) this.invalidateGerritCache(repo); // the deleted refs must not be served from the cache
 		return result;
+	}
+
+	/**
+	 * Get the status of the tracked Git hooks of a repository.
+	 */
+	private async gerritGetHookStatus(repo: string): Promise<{ error: ErrorInfo; hooks: { name: string; installed: boolean; installable: boolean }[] }> {
+		return this.dataSource.gerrit.getHookStatus(repo);
+	}
+
+	/**
+	 * Download a Git hook from the Gerrit server and install it into the repository's hooks directory.
+	 */
+	private async gerritInstallHook(repo: string, hook: string): Promise<{ error: ErrorInfo; installed: boolean }> {
+		return this.dataSource.gerrit.installHook(repo, getConfig().gerrit.remote, hook);
 	}
 
 	/**

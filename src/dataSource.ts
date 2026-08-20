@@ -7,7 +7,7 @@ import { AskpassEnvironment, AskpassManager } from './askpass/askpassManager';
 import { getConfig } from './config';
 import { GerritDataSource } from './gerrit';
 import { Logger } from './logger';
-import { ActionedUser, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
+import { ActionedUser, BisectInfo, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
 import { GitExecutable, GitVersionRequirement, UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, constructIncompatibleGitVersionMessage, doesVersionMeetRequirement, getPathFromStr, getPathFromUri, isSafeRefName, isSafeStashSelector, isValidCommitHash, openGitTerminal, pathWithTrailingSlash, quoteShellArg, realpath, resolveSpawnOutput, showErrorMessage } from './utils';
 import { Disposable } from './utils/disposable';
 import { GgEvent } from './utils/event';
@@ -1265,6 +1265,89 @@ export class DataSource extends Disposable {
 	/* Git Action Methods - Commits */
 
 	/**
+	 * Start a Git bisect session in a repository, marking the bad commit (and optionally the good commit).
+	 * @param repo The path of the repository.
+	 * @param badHash The hash of the commit known to contain the bug.
+	 * @param goodHash The hash of a commit known to be free of the bug (or `null` to only mark the bad commit).
+	 * @returns The ErrorInfo from the executed commands, and the first bad commit if the bisect converged immediately.
+	 */
+	public async bisectStart(repo: string, badHash: string, goodHash: string | null): Promise<{ error: ErrorInfo; firstBadCommit: string | null }> {
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['badHash', badHash, 'hash']);
+		if (unsafeArgs !== null) return { error: unsafeArgs, firstBadCommit: null };
+		if (goodHash !== null) {
+			const unsafeGoodArgs = DataSource.checkUnsafeGitArgs(['goodHash', goodHash, 'hash']);
+			if (unsafeGoodArgs !== null) return { error: unsafeGoodArgs, firstBadCommit: null };
+		}
+
+		const startError = await this.runGitCommand(['bisect', 'start'], repo);
+		if (startError !== null) return { error: startError, firstBadCommit: null };
+
+		const badResult = await this.bisectMark(repo, 'bad', badHash);
+		if (badResult.error !== null) return { error: badResult.error, firstBadCommit: badResult.firstBadCommit };
+		if (goodHash === null) return badResult;
+
+		return this.bisectMark(repo, 'good', goodHash);
+	}
+
+	/**
+	 * Mark a commit as good, bad or skipped during a Git bisect session.
+	 * @param repo The path of the repository.
+	 * @param mark The bisect state to mark the commit with.
+	 * @param commitHash The hash of the commit to mark (or `null` to mark the current bisect commit).
+	 * @returns The ErrorInfo from the executed command, and the first bad commit if the bisect converged.
+	 */
+	public bisectMark(repo: string, mark: 'good' | 'bad' | 'skip', commitHash: string | null): Promise<{ error: ErrorInfo; firstBadCommit: string | null }> {
+		if (commitHash !== null) {
+			const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
+			if (unsafeArgs !== null) return Promise.resolve({ error: unsafeArgs, firstBadCommit: null });
+		}
+
+		const args = ['bisect', mark];
+		if (commitHash !== null) args.push(commitHash);
+
+		return this.spawnGit(args, repo, (stdout) => ({
+			error: null,
+			firstBadCommit: DataSource.parseFirstBadCommit(stdout.toString())
+		})).catch((errorMessage: string) => ({ error: errorMessage as ErrorInfo, firstBadCommit: null }));
+	}
+
+	/**
+	 * End a Git bisect session in a repository (i.e. `git bisect reset`).
+	 * @param repo The path of the repository.
+	 * @returns The ErrorInfo from the executed command.
+	 */
+	public bisectReset(repo: string) {
+		return this.runGitCommand(['bisect', 'reset'], repo);
+	}
+
+	/**
+	 * Get the current Git bisect state of a repository.
+	 * @param repo The path of the repository.
+	 * @returns The bisect state parsed from `git bisect log`.
+	 */
+	public getBisectInfo(repo: string): Promise<BisectInfo> {
+		return this.gitOutput(['bisect', 'log'], repo, (stdout) => {
+			const info: Writeable<BisectInfo> = { inProgress: true, goodHashes: [], badHashes: [], firstBadCommit: null };
+			for (const line of stdout.split('\n')) {
+				const match = /^git bisect (good|bad) ([0-9a-f]{7,40})/.exec(line.trim());
+				if (match === null) continue;
+				(match[1] === 'good' ? info.goodHashes : info.badHashes).push(match[2]);
+			}
+			return info;
+		}).catch(() => ({ inProgress: false, goodHashes: [], badHashes: [], firstBadCommit: null }));
+	}
+
+	/**
+	 * Parse the "X is the first bad commit" line from a `git bisect` output.
+	 * @param output The output of a `git bisect good/bad/skip` command.
+	 * @returns The full hash of the first bad commit, or `null` if the bisect has not yet converged.
+	 */
+	private static parseFirstBadCommit(output: string): string | null {
+		const match = /([0-9a-f]{40}) is the first bad commit/.exec(output);
+		return match === null ? null : match[1];
+	}
+
+	/**
 	 * Checkout a commit in a repository.
 	 * @param repo The path of the repository.
 	 * @param commitHash The hash of the commit to check out.
@@ -1371,6 +1454,40 @@ export class DataSource extends Disposable {
 	 */
 	public undoLastCommit(repo: string) {
 		return this.runGitCommand(['reset', '--soft', 'HEAD^'], repo);
+	}
+
+	/**
+	 * Amend the last commit in a repository, keeping the existing commit message and staged changes.
+	 * @param repo The path of the repository.
+	 * @returns The ErrorInfo from the executed command.
+	 */
+	public amendLastCommit(repo: string): Promise<ErrorInfo> {
+		const args = ['commit', '--amend', '--no-edit'];
+		if (getConfig().signCommits) {
+			args.push('-S');
+		}
+		return this.runGitCommand(args, repo);
+	}
+
+	/**
+	 * Reset the current branch to its upstream (remote tracking) branch, keeping all changes staged (soft reset).
+	 * @param repo The path of the repository.
+	 * @returns The ErrorInfo from the executed command.
+	 */
+	public resetCurrentBranchToRemote(repo: string): Promise<ErrorInfo> {
+		return this.runGitCommand(['reset', '--soft', '@{upstream}'], repo);
+	}
+
+	/**
+	 * Get the name of the upstream (remote tracking) branch of the current branch, or NULL if it has none.
+	 * @param repo The path of the repository.
+	 */
+	public async getCurrentBranchUpstream(repo: string): Promise<string | null> {
+		try {
+			return await this.spawnGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], repo, (stdout: string) => stdout.trim());
+		} catch (_) {
+			return null;
+		}
 	}
 
 	/**

@@ -4,7 +4,7 @@ jest.mock('vscode', () => vscode, { virtual: true });
 jest.mock('fs');
 
 import * as fs from 'fs';
-import { ExtensionState } from '../src/extensionState';
+import { DEFAULT_REPO_STATE, ExtensionState } from '../src/extensionState';
 import { BooleanOverride, FileViewType, GitGraphViewGlobalState, GitGraphViewWorkspaceState, GitRepoState, RepoCommitOrdering } from '../src/types';
 import { GitExecutable } from '../src/utils';
 import { EventEmitter } from '../src/utils/event';
@@ -54,6 +54,24 @@ describe('ExtensionState', () => {
 	});
 
 	describe('getRepos', () => {
+		it('Should persist and return pinned commits and branches of a repository', () => {
+			// Setup: a repository with pinned branches and commits
+			const repoState: GitRepoState = Object.assign({}, DEFAULT_REPO_STATE, {
+				pinnedBranches: ['main', 'release/2.0'],
+				pinnedCommits: [{ hash: 'abc123', summary: 'Fix camera crash' }]
+			});
+			extensionContext.workspaceState.get.mockReturnValueOnce({
+				'/path/to/repo': repoState
+			});
+
+			// Run
+			const result = extensionState.getRepos();
+
+			// Assert
+			expect(result['/path/to/repo'].pinnedBranches).toEqual(['main', 'release/2.0']);
+			expect(result['/path/to/repo'].pinnedCommits).toEqual([{ hash: 'abc123', summary: 'Fix camera crash' }]);
+		});
+
 		it('Should return the stored repositories', () => {
 			// Setup
 			const repoState: GitRepoState = {
@@ -70,6 +88,7 @@ describe('ExtensionState', () => {
 				onlyFollowFirstParent: BooleanOverride.Disabled,
 				onRepoLoadShowCheckedOutBranch: BooleanOverride.Enabled,
 				onRepoLoadShowSpecificBranches: ['master'],
+				pinnedBranches: [], pinnedCommits: [],
 				pullRequestConfig: null,
 				showRemoteBranches: true,
 				showRemoteBranchesV2: BooleanOverride.Enabled,
@@ -118,6 +137,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: true,
 					showRemoteBranchesV2: BooleanOverride.Default,
@@ -156,6 +176,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: true,
 					showRemoteBranchesV2: BooleanOverride.Default,
@@ -194,6 +215,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: false,
 					showRemoteBranchesV2: BooleanOverride.Disabled,
@@ -232,6 +254,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: false,
 					showRemoteBranchesV2: BooleanOverride.Default,
@@ -270,6 +293,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: true,
 					showRemoteBranchesV2: BooleanOverride.Enabled,
@@ -311,6 +335,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: true,
 					showRemoteBranchesV2: BooleanOverride.Default,
@@ -332,6 +357,7 @@ describe('ExtensionState', () => {
 					onlyFollowFirstParent: BooleanOverride.Default,
 					onRepoLoadShowCheckedOutBranch: BooleanOverride.Default,
 					onRepoLoadShowSpecificBranches: null,
+					pinnedBranches: [], pinnedCommits: [],
 					pullRequestConfig: null,
 					showRemoteBranches: false,
 					showRemoteBranchesV2: BooleanOverride.Disabled,

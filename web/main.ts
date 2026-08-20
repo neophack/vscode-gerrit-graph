@@ -10,6 +10,8 @@ class GitGraphView {
 	private gitTags: ReadonlyArray<string> = [];
 	private commits: GG.GitCommit[] = [];
 	private commitHead: string | null = null;
+	private bisect: GG.BisectInfo | null = null;
+	public bisectFirstBad: string | null = null;
 	private commitLookup: { [hash: string]: number } = {};
 	private onlyFollowFirstParent: boolean = false;
 	private avatars: AvatarImageCollection = {};
@@ -61,6 +63,7 @@ class GitGraphView {
 	private readonly viewElem: HTMLElement;
 	private readonly controlsElem: HTMLElement;
 	private readonly gerritControlsElem: HTMLElement | null;
+	private readonly pinnedControlsElem: HTMLElement | null;
 	private readonly tableElem: HTMLElement;
 	private readonly footerElem: HTMLElement;
 	private readonly showRemoteBranchesElem: HTMLInputElement;
@@ -85,6 +88,10 @@ class GitGraphView {
 
 		this.controlsElem = document.getElementById('controls')!;
 		this.gerritControlsElem = document.getElementById('gerritControls');
+		this.pinnedControlsElem = document.getElementById('pinnedControls');
+		if (this.pinnedControlsElem !== null) {
+			this.pinnedControlsElem.addEventListener('click', (e) => this.onPinnedChipClick(<HTMLElement>e.target));
+		}
 		this.tableElem = document.getElementById('commitTable')!;
 		this.footerElem = document.getElementById('footer')!;
 
@@ -561,10 +568,107 @@ class GitGraphView {
 		if (msg.error === null) {
 			const refreshState = this.currentRepoRefreshState;
 			if (refreshState.inProgress && refreshState.loadRepoInfoRefreshId === msg.refreshId) {
+				// Older fixtures / responses may omit the bisect info: treat it as "no bisect in progress"
+				const msgBisect = typeof msg.bisect === 'undefined' || msg.bisect === null ? null : msg.bisect;
+				const bisectChanged = !this.bisectInfoEquals(msgBisect);
+				this.bisect = msgBisect;
+				if (bisectChanged) {
+					// Force the commits to be re-rendered so that the bisect badges are updated
+					this.renderedGitBranchHead = null;
+					if (msgBisect === null || !msgBisect.inProgress) this.bisectFirstBad = null;
+				}
 				this.loadRepoInfo(msg.branches, msg.head, msg.remotes, msg.stashes, msg.isRepo);
 			}
 		} else {
 			this.displayLoadDataError('Unable to load Repository Info', msg.error);
+		}
+	}
+
+	private bisectInfoEquals(bisect: GG.BisectInfo | null) {
+		const a = this.bisect;
+		if (a === null || bisect === null) return a === bisect;
+		return a.inProgress === bisect.inProgress && arraysStrictlyEqual(a.goodHashes, bisect.goodHashes) && arraysStrictlyEqual(a.badHashes, bisect.badHashes);
+	}
+
+	/**
+	 * Record the first bad commit found by a converged bisect, and force the next
+	 * commit load to fully re-render so that the result banner and ★ badge are shown.
+	 */
+	public setBisectFirstBad(firstBadCommit: string | null) {
+		this.bisectFirstBad = firstBadCommit;
+		this.renderedGitBranchHead = null;
+	}
+
+	private getBisectBadgeHtml(hash: string) {
+		if (this.bisect === null || !this.bisect.inProgress || hash === UNCOMMITTED) return '';
+		if (hash === this.bisectFirstBad) {
+			return '<span class="bisectBadge firstBad" title="This is the first bad commit (\u2605 found by bisect)">\u2605 FIRST BAD</span>';
+		}
+		if (this.bisect.badHashes.some((bad: string) => bad === hash || bad.startsWith(hash) || hash.startsWith(bad))) {
+			return '<span class="bisectBadge bad" title="Marked as bad during the current bisect">BAD</span>';
+		}
+		if (this.bisect.goodHashes.some((good: string) => good === hash || good.startsWith(hash) || hash.startsWith(good))) {
+			return '<span class="bisectBadge good" title="Marked as good during the current bisect">GOOD</span>';
+		}
+		return '';
+	}
+
+	private renderBisectBanner() {
+		const banner = document.getElementById('bisectBanner');
+		if (banner === null) return;
+		const bisect = this.bisect;
+		if (bisect === null || !bisect.inProgress) {
+			banner.innerHTML = '';
+			banner.style.display = 'none';
+			return;
+		}
+
+		const abbrev = (hashes: string[]) => hashes.length > 0 ? abbrevCommit(hashes[hashes.length - 1]) : '\u2014';
+		let html = '<span class="bisectBannerTitle">BISECT</span>' +
+			'<span class="bisectBannerInfo">Good: <b>' + abbrev(bisect.goodHashes) + '</b></span>' +
+			'<span class="bisectBannerInfo">Bad: <b>' + abbrev(bisect.badHashes) + '</b></span>' +
+			'<span class="bisectBannerInfo">Current: <b>' + (this.commitHead !== null ? abbrevCommit(this.commitHead) : '\u2014') + '</b></span>';
+
+		if (this.bisectFirstBad !== null) {
+			html += '<span class="bisectBannerResult">\u2605 ' + abbrevCommit(this.bisectFirstBad) + ' is the first bad commit</span>' +
+				'<span class="bisectBannerBtn" data-action="viewCommit">View Commit</span>' +
+				'<span class="bisectBannerBtn" data-action="endBisect">End Bisect</span>';
+		} else {
+			html += '<span class="bisectBannerBtn bad" data-action="markBad" title="The bug exists in the current commit">Bug exists (Bad)</span>' +
+				'<span class="bisectBannerBtn good" data-action="markGood" title="The bug does not exist in the current commit">Bug doesn\'t exist (Good)</span>' +
+				'<span class="bisectBannerBtn" data-action="markSkip" title="Skip the current commit (e.g. it does not build)">Skip</span>' +
+				'<span class="bisectBannerBtn" data-action="endBisect">End Bisect</span>';
+		}
+
+		banner.innerHTML = html;
+		banner.style.display = 'flex';
+
+		for (const btn of Array.from(banner.querySelectorAll('.bisectBannerBtn'))) {
+			btn.addEventListener('click', () => {
+				const action = (<HTMLElement>btn).dataset.action;
+				switch (action) {
+					case 'markBad':
+						runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'bad', commitHash: null }, 'Marking Commit as Bad');
+						break;
+					case 'markGood':
+						runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'good', commitHash: null }, 'Marking Commit as Good');
+						break;
+					case 'markSkip':
+						runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'skip', commitHash: null }, 'Skipping Commit');
+						break;
+					case 'viewCommit':
+						if (this.bisectFirstBad !== null && this.commitLookup[this.bisectFirstBad] !== undefined) {
+							this.scrollToCommit(this.bisectFirstBad, true, true);
+						}
+						break;
+					case 'endBisect':
+						dialog.showConfirmation('Are you sure you want to end the current bisect session? The repository will be returned to the original branch.', 'Yes, end bisect', () => {
+							this.bisectFirstBad = null;
+							runAction({ command: 'bisectReset', repo: this.currentRepo }, 'Ending Bisect');
+						}, null);
+						break;
+				}
+			});
 		}
 	}
 
@@ -907,11 +1011,99 @@ class GitGraphView {
 	}
 
 
+	/* Pinned Commits & Branches */
+
+	private getPinnedCommits(): GG.PinnedCommit[] {
+		const repo = this.gitRepos[this.currentRepo];
+		return repo !== undefined && repo.pinnedCommits !== undefined ? repo.pinnedCommits : [];
+	}
+
+	private getPinnedBranches(): string[] {
+		const repo = this.gitRepos[this.currentRepo];
+		return repo !== undefined && repo.pinnedBranches !== undefined ? repo.pinnedBranches : [];
+	}
+
+	private isCommitPinned(hash: string) {
+		return this.getPinnedCommits().some((pinned) => pinned.hash === hash);
+	}
+
+	private togglePinCommit(hash: string, summary: string) {
+		if (hash === UNCOMMITTED) return;
+		const wasPinned = this.isCommitPinned(hash);
+		const pinned = this.getPinnedCommits().filter((pinned) => pinned.hash !== hash);
+		if (!wasPinned) pinned.push({ hash: hash, summary: summary });
+		this.saveRepoStateValue(this.currentRepo, 'pinnedCommits', pinned);
+		this.render();
+	}
+
+	private togglePinBranch(branch: string) {
+		const wasPinned = this.getPinnedBranches().includes(branch);
+		const pinned = this.getPinnedBranches().filter((pinnedBranch) => pinnedBranch !== branch);
+		if (!wasPinned) pinned.push(branch);
+		this.saveRepoStateValue(this.currentRepo, 'pinnedBranches', pinned);
+		this.render();
+	}
+
+	/**
+	 * Render the Pinned row at the top of the graph, listing the pinned branches and commits of the
+	 * current repository as chips (click to jump, click the ✕ to unpin).
+	 */
+	private renderPinnedControls() {
+		const controls = this.pinnedControlsElem;
+		if (controls === null) return;
+		if (typeof this.currentRepo === 'undefined') {
+			controls.style.display = 'none';
+			return;
+		}
+
+		const pinnedBranches = this.getPinnedBranches();
+		const pinnedCommits = this.getPinnedCommits();
+
+		let html = '<span class="unselectable pinnedRowLabel">Pinned:</span>';
+		for (const branch of pinnedBranches) {
+			const name = escapeHtml(branch);
+			html += '<span class="pinnedChip" data-type="branch" data-value="' + name + '" title="Show only branch ' + name + ' (click ✕ to unpin)">\uD83D\uDCCC ' + name +
+				'<span class="pinnedChipRemove" data-type="branch" data-value="' + name + '" title="Unpin branch ' + name + '">&times;</span></span>';
+		}
+		for (const pinned of pinnedCommits) {
+			const hash = escapeHtml(pinned.hash);
+			const summary = escapeHtml(pinned.summary);
+			html += '<span class="pinnedChip" data-type="commit" data-value="' + hash + '" title="Jump to commit ' + hash + ' (click ✕ to unpin)">\uD83D\uDCCC <b>' + abbrevCommit(pinned.hash) + '</b>' + (summary !== '' ? ' ' + summary : '') +
+				'<span class="pinnedChipRemove" data-type="commit" data-value="' + hash + '" title="Unpin commit ' + hash + '">&times;</span></span>';
+		}
+		controls.innerHTML = html;
+		controls.style.display = pinnedBranches.length + pinnedCommits.length > 0 ? 'block' : 'none';
+	}
+
+	private onPinnedChipClick(target: HTMLElement) {
+		const remove = <HTMLElement | null>target.closest('.pinnedChipRemove');
+		if (remove !== null && remove.dataset.value !== undefined) {
+			if (remove.dataset.type === 'commit') this.togglePinCommit(remove.dataset.value, '');
+			else this.togglePinBranch(remove.dataset.value);
+			return;
+		}
+
+		const chip = <HTMLElement | null>target.closest('.pinnedChip');
+		if (chip === null || chip.dataset.value === undefined) return;
+		if (chip.dataset.type === 'commit') {
+			if (this.commitLookup[chip.dataset.value] === undefined) {
+				dialog.showError('Pinned Commit', 'The pinned commit is not currently in the view. Load more commits or clear the branch / path filters.', 'Close', null);
+				return;
+			}
+			this.scrollToCommit(chip.dataset.value, true, true);
+		} else {
+			this.branchDropdown.selectOnlyOption(chip.dataset.value);
+		}
+	}
+
+
 	/* Renderers */
 
 	private render() {
+		this.renderPinnedControls();
 		this.renderTable();
 		this.renderGraph();
+		this.renderBisectBanner();
 	}
 
 	private renderGraph() {
@@ -962,6 +1154,7 @@ class GitGraphView {
 		const vertexColours = this.graph.getVertexColours();
 		const widthsAtVertices = this.config.referenceLabels.branchLabelsAlignedToGraph ? this.graph.getWidthsAtVertices() : [];
 		const mutedCommits = this.graph.getMutedCommits(currentHash);
+		const pinnedCommitHashes = new Set(this.getPinnedCommits().map((pinned) => pinned.hash));
 		const textFormatter = new TextFormatter(this.commits, this.gitRepos[this.currentRepo].issueLinkingConfig, {
 			emoji: true,
 			issueLinking: true,
@@ -1052,9 +1245,13 @@ class GitGraphView {
 					: 'This commit is currently checked out'
 				) + '."></span>'
 				: '';
+			const pinnedBadge = pinnedCommitHashes.has(commit.hash)
+				? '<span class="pinnedBadge" title="Pinned commit">\uD83D\uDCCC</span>'
+				: '';
+			const bisectBadge = this.getBisectBadgeHtml(commit.hash);
 
 			html += '<tr class="commit' + (commit.hash === currentHash ? ' current' : '') + (mutedCommits[i] ? ' mute' : '') + '"' + (commit.hash !== UNCOMMITTED ? '' : ' id="uncommittedChanges"') + ' data-id="' + i + '" data-color="' + vertexColours[i] + '">' +
-				(this.config.referenceLabels.branchLabelsAlignedToGraph ? '<td>' + getResizeColHtml(0) + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot : '<td>' + getResizeColHtml(0) + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot + refBranches) + (this.config.referenceLabels.tagLabelsOnRight ? refGerrit + message + (refTags !== '' ? '<span class="tagsWrapper">' + refTags + '</span>' : '') : refTags + refGerrit + message) + '</span></td>' +
+				(this.config.referenceLabels.branchLabelsAlignedToGraph ? '<td>' + getResizeColHtml(0) + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot + pinnedBadge + bisectBadge : '<td>' + getResizeColHtml(0) + '</td><td>' + getResizeColHtml(1) + '<span class="description">' + commitDot + pinnedBadge + bisectBadge + refBranches) + (this.config.referenceLabels.tagLabelsOnRight ? refGerrit + message + (refTags !== '' ? '<span class="tagsWrapper">' + refTags + '</span>' : '') : refTags + refGerrit + message) + '</span></td>' +
 				(colVisibility.date ? '<td class="dateCol text" title="' + date.title + '">' + getResizeColHtml(2) + date.formatted + '</td>' : '') +
 				(colVisibility.author ? '<td class="authorCol text" title="' + escapeHtml(commit.author + ' <' + commit.email + '>') + '">' + getResizeColHtml(3) + (this.config.fetchAvatars ? '<span class="avatar" data-email="' + escapeHtml(commit.email) + '">' + (typeof this.avatars[commit.email] === 'string' ? '<img class="avatarImg" src="' + this.avatars[commit.email] + '">' : '') + '</span>' : '') + escapeHtml(commit.author) + '</td>' : '') +
 				(colVisibility.commit ? '<td class="text" title="' + escapeHtml(commit.hash) + '">' + getResizeColHtml(4) + abbrevCommit(commit.hash) + '</td>' : '') +
@@ -1247,6 +1444,41 @@ class GitGraphView {
 		}, null);
 	}
 
+	private gerritHooksAction() {
+		runAction({ command: 'gerritGetHookStatus', repo: this.currentRepo }, 'Loading Hook Status');
+	}
+
+	/**
+	 * Re-load the hook status from the extension (used after a hook was installed so the Hooks
+	 * dialog reflects the newly installed hook).
+	 */
+	public reloadHookStatus() {
+		runAction({ command: 'gerritGetHookStatus', repo: this.currentRepo }, 'Loading Hook Status');
+	}
+
+	/**
+	 * Show the Hooks dialog: the status of every tracked Git hook, with a click-to-install link for
+	 * the hooks Gerrit serves (commit-msg).
+	 */
+	public showHooksDialog(hooks: ReadonlyArray<GG.GerritHookStatus>) {
+		const rows = hooks.map((hook) => {
+			const check = hook.installed ? '<span style="color:var(--gitgis-success, #4bb44a);">&#10003;</span>' : '<span style="color:var(--gitgis-error, #bb4b4b);">&#10007;</span>';
+			const action = !hook.installed && hook.installable
+				? ' &mdash; <span class="gg-hook-install" data-hook="' + escapeHtml(hook.name) + '" style="cursor:pointer;text-decoration:underline">Get from Gerrit</span>'
+				: '';
+			return '<div style="padding:2px 0">' + check + ' <b>' + escapeHtml(hook.name) + '</b>' + action + '</div>';
+		}).join('');
+		dialog.showForm('<b>HOOKS</b><br><span class="gg-hint">The Git hooks of this repository (in &lt;git-dir&gt;/hooks/).</span><div style="margin-top:6px">' + rows + '</div>', [], 'Close', () => {}, null);
+		dialog.useCloseIcon();
+		// Install a missing Gerrit-served hook when its "Get from Gerrit" link is clicked
+		dialog.onClick('.gg-hook-install', (elem) => {
+			const hook = elem.dataset.hook!;
+			dialog.showConfirmation('Download and install the <b><i>' + escapeHtml(hook) + '</i></b> hook from the Gerrit server into this repository?', 'Yes, install', () => {
+				runAction({ command: 'gerritInstallHook', repo: this.currentRepo, hook: hook }, 'Installing ' + hook + ' Hook');
+			}, null);
+		});
+	}
+
 	private initGerritControls() {
 		const controlsRow = this.gerritControlsElem;
 		if (controlsRow === null || !this.config.gerrit.enabled) {
@@ -1282,6 +1514,14 @@ class GitGraphView {
 			clearRefsBtn.innerHTML = SVG_ICONS.trash + '<span>Clear</span>';
 			clearRefsBtn.title = 'Clear Refs: delete downloaded Gerrit change refs (refs/remotes/' + this.config.gerrit.remote + '/changes/*)';
 			clearRefsBtn.addEventListener('click', () => this.gerritClearRefsAction());
+		}
+
+		// Git hooks status button (icon + label)
+		const hooksBtn = document.getElementById('gerritHooksBtn');
+		if (hooksBtn !== null) {
+			hooksBtn.innerHTML = SVG_ICONS.download + '<span>Hooks</span>';
+			hooksBtn.title = 'Hooks: show the status of this repository\'s Git hooks (and install the Gerrit commit-msg hook)';
+			hooksBtn.addEventListener('click', () => this.gerritHooksAction());
 		}
 
 		const filterControl = document.getElementById('gerritFilterControl');
@@ -1561,6 +1801,12 @@ class GitGraphView {
 					sendMessage({ command: 'copyToClipboard', type: 'Branch Name', data: refName });
 				}
 			}
+		], [
+			{
+				title: this.getPinnedBranches().includes(refName) ? 'Unpin Branch' : 'Pin Branch',
+				visible: true,
+				onClick: () => this.togglePinBranch(refName)
+			}
 		]];
 	}
 
@@ -1702,6 +1948,44 @@ class GitGraphView {
 			}
 		], [
 			{
+				title: 'Mark as Bisect Bad (Start Bisect)',
+				visible: visibility.bisect && hash !== UNCOMMITTED && (this.bisect === null || !this.bisect.inProgress),
+				onClick: () => {
+					dialog.showConfirmation('Are you sure you want to start a bisect session and mark commit <b><i>' + abbrevCommit(hash) + '</i></b> as bad?', 'Yes, start bisect', () => {
+						this.bisectFirstBad = null;
+						runAction({ command: 'bisectStart', repo: this.currentRepo, badHash: hash, goodHash: null }, 'Starting Bisect');
+					}, target);
+				}
+			}, {
+				title: 'Mark as Bisect Good',
+				visible: visibility.bisect && hash !== UNCOMMITTED && this.bisect !== null && this.bisect.inProgress,
+				onClick: () => {
+					runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'good', commitHash: hash }, 'Marking Commit as Good');
+				}
+			}, {
+				title: 'Mark as Bisect Bad',
+				visible: visibility.bisect && hash !== UNCOMMITTED && this.bisect !== null && this.bisect.inProgress,
+				onClick: () => {
+					runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'bad', commitHash: hash }, 'Marking Commit as Bad');
+				}
+			}, {
+				title: 'Mark as Bisect Skip',
+				visible: visibility.bisect && hash !== UNCOMMITTED && this.bisect !== null && this.bisect.inProgress,
+				onClick: () => {
+					runAction({ command: 'bisectMark', repo: this.currentRepo, mark: 'skip', commitHash: hash }, 'Skipping Commit');
+				}
+			}, {
+				title: 'End Bisect',
+				visible: visibility.bisect && this.bisect !== null && this.bisect.inProgress,
+				onClick: () => {
+					dialog.showConfirmation('Are you sure you want to end the current bisect session? The repository will be returned to the original branch.', 'Yes, end bisect', () => {
+						this.bisectFirstBad = null;
+						runAction({ command: 'bisectReset', repo: this.currentRepo }, 'Ending Bisect');
+					}, target);
+				}
+			}
+		], [
+			{
 				title: 'Copy Commit Hash to Clipboard',
 				visible: visibility.copyHash,
 				onClick: () => {
@@ -1760,6 +2044,12 @@ class GitGraphView {
 				visible: this.config.gerrit.enabled && this.config.gerrit.showPushButton && hash === this.commitHead,
 				onClick: () => this.gerritSubmitReviewAction()
 			}, this.getGerritAutosquashMenuItem('fixup', hash, target), this.getGerritAutosquashMenuItem('squash', hash, target)
+		], [
+			{
+				title: this.isCommitPinned(hash) ? 'Unpin Commit' : 'Pin Commit',
+				visible: hash !== UNCOMMITTED,
+				onClick: () => this.togglePinCommit(hash, commit.message.split(/\r?\n/)[0])
+			}
 		]];
 	}
 
@@ -1881,6 +2171,12 @@ class GitGraphView {
 				onClick: () => {
 					sendMessage({ command: 'copyToClipboard', type: 'Branch Name', data: refName });
 				}
+			}
+		], [
+			{
+				title: this.getPinnedBranches().includes(branchName) ? 'Unpin Branch' : 'Pin Branch',
+				visible: true,
+				onClick: () => this.togglePinBranch(branchName)
 			}
 		]];
 	}
@@ -2485,10 +2781,12 @@ class GitGraphView {
 	}
 
 	/**
-	 * Get the total height of the header rows (the main controls row + the Gerrit controls row).
+	 * Get the total height of the header rows (the main controls row + the Gerrit controls row + the Pinned row).
 	 */
 	private getHeaderHeight() {
-		return this.controlsElem.clientHeight + (this.gerritControlsElem !== null ? this.gerritControlsElem.clientHeight : 0);
+		return this.controlsElem.clientHeight
+			+ (this.gerritControlsElem !== null ? this.gerritControlsElem.clientHeight : 0)
+			+ (this.pinnedControlsElem !== null && this.pinnedControlsElem.style.display !== 'none' ? this.pinnedControlsElem.clientHeight : 0);
 	}
 
 
@@ -3927,6 +4225,18 @@ window.addEventListener('load', () => {
 			case 'checkoutCommit':
 				refreshOrDisplayError(msg.error, 'Unable to Checkout Commit');
 				break;
+			case 'bisectStart':
+				if (msg.error === null && msg.firstBadCommit !== null) gitGraph.setBisectFirstBad(msg.firstBadCommit);
+				refreshOrDisplayError(msg.error, 'Unable to Start Bisect');
+				break;
+			case 'bisectMark':
+				if (msg.error === null && msg.firstBadCommit !== null) gitGraph.setBisectFirstBad(msg.firstBadCommit);
+				refreshOrDisplayError(msg.error, 'Unable to Mark Commit for Bisect');
+				break;
+			case 'bisectReset':
+				if (msg.error === null) gitGraph.setBisectFirstBad(null);
+				refreshOrDisplayError(msg.error, 'Unable to End Bisect');
+				break;
 			case 'cherrypickCommit':
 				refreshAndDisplayErrors(msg.errors, 'Unable to Cherry Pick Commit');
 				break;
@@ -4030,6 +4340,24 @@ window.addEventListener('load', () => {
 					gitGraph.refresh(false, false);
 				} else {
 					dialog.showError('Unable to Clear Gerrit Refs', msg.error, null, null);
+				}
+				break;
+			case 'gerritGetHookStatus':
+				if (msg.error === null) {
+					gitGraph.showHooksDialog(msg.hooks);
+				} else {
+					dialog.showError('Unable to Load Hook Status', msg.error, null, null);
+				}
+				break;
+			case 'gerritInstallHook':
+				if (msg.error === null) {
+					dialog.showMessage(msg.installed
+						? 'The <b>' + msg.hook + '</b> hook was installed into this repository\'s hooks directory.'
+						: 'The <b>' + msg.hook + '</b> hook is already installed and up to date - nothing was changed.');
+					// Re-load the hook status so the dialog reflects the newly installed hook
+					gitGraph.reloadHookStatus();
+				} else {
+					dialog.showError('Unable to Install ' + msg.hook + ' Hook', msg.error, null, null);
 				}
 				break;
 			case 'gerritAmendChangeId':

@@ -1223,6 +1223,75 @@ body.vscode-high-contrast{
 
 .gerritFilterChip:hover { opacity:0.85; }
 
+/* The Pinned row: lists the pinned branches and commits as chips (click to jump, ✕ to unpin) */
+#pinnedControls{
+	display:none;
+	position: relative;
+	left:0;
+	right:0;
+	top:0;
+	white-space:nowrap;
+	overflow-x:auto;
+	overflow-y:hidden;
+	padding:2px 0;
+	background-color: var(--vscode-editor-background);
+	border-bottom:1px solid rgba(128,128,128,0.35);
+	line-height:24px;
+	text-align:center;
+	font-weight:700;
+	font-size:12px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+.pinnedRowLabel {
+	margin: 0 10px 0 4px;
+}
+
+.pinnedChip {
+	display:inline-block;
+	margin:0 2px;
+	padding:0 6px;
+	font-size:11px;
+	font-weight:400;
+	line-height:18px;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:9px;
+	cursor:pointer;
+	-webkit-user-select:none;
+	user-select:none;
+	vertical-align:middle;
+}
+
+.pinnedChip:hover {
+	border-color:var(--vscode-button-background);
+}
+
+.pinnedChip b {
+	font-weight:600;
+}
+
+.pinnedChipRemove {
+	margin-left:4px;
+	padding:0 2px;
+	font-size:12px;
+	font-weight:700;
+	border-radius:50%;
+	vertical-align:middle;
+}
+
+.pinnedChipRemove:hover {
+	color:var(--vscode-errorForeground, #bb4b4b);
+}
+
+/* The 📌 badge shown in the description of pinned commits */
+.pinnedBadge {
+	margin-right:4px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+
 .gerritFilterChip.active {
 	opacity:1;
 	border-color:var(--vscode-button-background);
@@ -1312,6 +1381,33 @@ body.vscode-high-contrast .gerritFilterChip.active {
 }
 
 #gerritClearRefsBtn:hover { border-color:var(--vscode-inputValidation-errorBorder, #be1100); color:var(--vscode-errorForeground, #f14c4c); }
+
+/* Git hooks status button (last button of the Gerrit row) */
+#gerritHooksBtn {
+	display:inline-block;
+	vertical-align:middle;
+	margin-left:8px;
+	padding:0 10px;
+	line-height:20px;
+	font-size:11px;
+	font-weight:700;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:3px;
+	background-color:transparent;
+	color:var(--vscode-editor-foreground);
+	cursor:pointer;
+	white-space:nowrap;
+}
+
+#gerritHooksBtn svg {
+	fill:currentColor;
+	vertical-align:-3px;
+	margin-right:4px;
+	width:11px;
+	height:13px;
+}
+
+#gerritHooksBtn:hover { border-color:var(--vscode-button-background); color:var(--vscode-button-foreground, var(--vscode-editor-foreground)); }
 
 /* In-table Gerrit meta event rows (anchored under the change's commit) */
 tr.gg-meta-row td {
@@ -1515,8 +1611,96 @@ body.vscode-high-contrast .gg-event-detail {
 	.gerritRowLabel{
 		display:none;
 	}
-	#gerritSubmitBtn, #gerritAmendBtn, #gerritClearRefsBtn{
+	#gerritSubmitBtn, #gerritAmendBtn, #gerritClearRefsBtn, #gerritHooksBtn{
 		margin-left:4px;
 		margin-right:4px;
 	}
+}
+
+/* Git Bisect banner (shown below the header controls while a bisect session is in progress) */
+#bisectBanner {
+	display:flex;
+	align-items:center;
+	flex-wrap:wrap;
+	padding:2px 8px;
+	border-top:1px solid var(--vscode-panel-border, #444);
+	font-size:12px;
+}
+
+#bisectBanner .bisectBannerTitle {
+	font-weight:700;
+	letter-spacing:1px;
+	margin-right:10px;
+	color:var(--vscode-badge-foreground, #fff);
+	background-color:var(--vscode-badge-background, #4d4d4d);
+	padding:1px 8px;
+	border-radius:8px;
+}
+
+#bisectBanner .bisectBannerInfo {
+	margin-right:14px;
+	white-space:nowrap;
+}
+
+#bisectBanner .bisectBannerResult {
+	margin-right:14px;
+	font-weight:700;
+	color:var(--vscode-errorForeground, #bb4b4b);
+	white-space:nowrap;
+}
+
+#bisectBanner .bisectBannerBtn {
+	display:inline-block;
+	margin:1px 6px 1px 0;
+	padding:1px 10px;
+	line-height:18px;
+	font-size:11px;
+	border:1px solid var(--vscode-panel-border, #444);
+	border-radius:9px;
+	cursor:pointer;
+	-webkit-user-select:none;
+	user-select:none;
+	white-space:nowrap;
+}
+
+#bisectBanner .bisectBannerBtn:hover {
+	border-color:var(--vscode-button-background);
+	background-color:var(--vscode-button-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+#bisectBanner .bisectBannerBtn.bad {
+	color:var(--vscode-errorForeground, #bb4b4b);
+}
+
+#bisectBanner .bisectBannerBtn.good {
+	color:var(--vscode-charts-green, #3fb950);
+}
+
+/* The BAD / GOOD / ★ FIRST BAD badges shown in the description of commits */
+.bisectBadge {
+	display:inline-block;
+	margin-right:4px;
+	padding:0 5px;
+	font-size:10px;
+	font-weight:700;
+	line-height:16px;
+	border-radius:8px;
+	vertical-align:middle;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+.bisectBadge.bad {
+	color:#fff;
+	background-color:#c0392b;
+}
+
+.bisectBadge.good {
+	color:#fff;
+	background-color:#2da44e;
+}
+
+.bisectBadge.firstBad {
+	color:#fff;
+	background-color:#b08500;
 }
