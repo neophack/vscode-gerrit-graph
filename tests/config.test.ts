@@ -638,6 +638,48 @@ describe('Config', () => {
 		});
 	});
 
+	describe('gerrit', () => {
+		it('Should return the default statusFilter when the configuration value is not set', () => {
+			// Run
+			const value = config.gerrit;
+
+			// Assert
+			expect(value.statusFilter).toStrictEqual({ new: true, merged: false, abandoned: false, wip: false });
+		});
+
+		it('Should return the configured statusFilter values', () => {
+			// Setup
+			vscode.mockExtensionSettingReturnValue('gerrit.statusFilter', { new: false, merged: true, abandoned: true, wip: true });
+
+			// Run
+			const value = config.gerrit;
+
+			// Assert
+			expect(value.statusFilter).toStrictEqual({ new: false, merged: true, abandoned: true, wip: true });
+		});
+
+		it('Should return the default statusFilter when the configuration value is explicitly null', () => {
+			// Setup: a raw settings.json edit can set a value to null, bypassing the schema's object type
+			vscode.mockExtensionSettingReturnValue('gerrit.statusFilter', null);
+
+			// Run
+			const value = config.gerrit;
+
+			// Assert
+			expect(value.statusFilter).toStrictEqual({ new: true, merged: false, abandoned: false, wip: false });
+		});
+
+		it('Should not throw when other gerrit settings are read alongside a null statusFilter', () => {
+			// Setup
+			vscode.mockExtensionSettingReturnValue('gerrit.statusFilter', null);
+			vscode.mockExtensionSettingReturnValue('gerrit.enabled', true);
+
+			// Run & Assert
+			expect(() => config.gerrit).not.toThrow();
+			expect(config.gerrit.enabled).toBe(true);
+		});
+	});
+
 	describe('dateFormat', () => {
 		it('Should successfully parse the configuration value "Date & Time"', () => {
 			// Setup

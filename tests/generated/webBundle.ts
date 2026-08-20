@@ -1139,8 +1139,15 @@ class Graph {
 		}
 
 		const overListener = (e: MouseEvent) => this.vertexOver(e), outListener = (e: MouseEvent) => this.vertexOut(e);
+		// this.expansions is sorted by index, so the offset for each vertex (in increasing index
+		// order) can be accumulated in a single pass, instead of rescanning all expansions per vertex
+		let expansionOffset = 0, nextExpansion = 0;
 		for (i = 0; i < this.vertices.length; i++) {
-			this.vertices[i].draw(group, this.config, this.getOffsetAt(i), overListener, outListener);
+			while (nextExpansion < this.expansions.length && this.expansions[nextExpansion].index < i) {
+				expansionOffset += this.expansions[nextExpansion].height;
+				nextExpansion++;
+			}
+			this.vertices[i].draw(group, this.config, expansionOffset, overListener, outListener);
 		}
 
 		if (this.group !== null) this.svg.removeChild(this.group);

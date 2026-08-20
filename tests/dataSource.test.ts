@@ -730,6 +730,25 @@ describe('DataSource', () => {
 			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['status', '--untracked-files=all', '--porcelain'], expect.objectContaining({ cwd: '/path/to/repo' }));
 		});
 
+		it('Should filter out unsafe branch names (argument injection hardening), but pass through commit hashes and Custom Branch Glob Patterns', async () => {
+			// Setup
+			mockGitSuccessOnce('\n');
+			mockGitSuccessOnce('1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b HEAD\n');
+			vscode.mockExtensionSettingReturnValue('repository.showUncommittedChanges', false);
+
+			// Run
+			await dataSource.getCommits('/path/to/repo', [
+				'master', // a normal branch name, must be kept
+				'--upload-pack=evil', // could be misinterpreted as a git option, must be dropped
+				'*bad*', // ref names can't contain '*', must be dropped
+				'--glob=refs/heads/release/*', // a Custom Branch Glob Pattern, must be kept even though it starts with '-'
+				'1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b' // a commit hash, must be kept
+			], null, 300, true, true, false, false, CommitOrdering.Date, ['origin'], [], []);
+
+			// Assert
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['-c', 'log.showSignature=false', 'log', '--max-count=301', '--format=%HXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%PXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%anXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%aeXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%atXX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb%B', '--date-order', '-z', 'master', '--glob=refs/heads/release/*', '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b', '--'], expect.objectContaining({ cwd: '/path/to/repo' }));
+		});
+
 		it('Should return the commits (no more commits)', async () => {
 			// Setup
 			mockGitSuccessOnce(
@@ -4525,6 +4544,24 @@ describe('DataSource', () => {
 			expect(result).toBe('error message');
 			expect(spyOnSpawn).toBeCalledTimes(2);
 		});
+
+		it('Should reject a url that could be misinterpreted as a git option (argument injection hardening)', async () => {
+			// Run
+			const result = await dataSource.addRemote('/path/to/repo', 'origin', '--upload-pack=evil', null, false);
+
+			// Assert
+			expect(result).toBe('Invalid URL was provided for "url"');
+			expect(spyOnSpawn).not.toHaveBeenCalled();
+		});
+
+		it('Should reject a pushUrl that could be misinterpreted as a git option (argument injection hardening)', async () => {
+			// Run
+			const result = await dataSource.addRemote('/path/to/repo', 'origin', 'https://github.com/mhutchie/vscode-git-graph.git', '--upload-pack=evil', false);
+
+			// Assert
+			expect(result).toBe('Invalid URL was provided for "pushUrl"');
+			expect(spyOnSpawn).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('deleteRemote', () => {
@@ -4668,6 +4705,24 @@ describe('DataSource', () => {
 
 			// Assert
 			expect(result).toBe('error message');
+		});
+
+		it('Should reject a urlNew that could be misinterpreted as a git option (argument injection hardening)', async () => {
+			// Run
+			const result = await dataSource.editRemote('/path/to/repo', 'origin', 'origin', 'https://github.com/mhutchie/vscode-git-graph.git', '--delete', null, null);
+
+			// Assert
+			expect(result).toBe('Invalid URL was provided for "urlNew"');
+			expect(spyOnSpawn).not.toHaveBeenCalled();
+		});
+
+		it('Should reject a pushUrlNew that could be misinterpreted as a git option (argument injection hardening)', async () => {
+			// Run
+			const result = await dataSource.editRemote('/path/to/repo', 'origin', 'origin', null, null, 'https://github.com/mhutchie/vscode-git-graph.git', '--delete');
+
+			// Assert
+			expect(result).toBe('Invalid URL was provided for "pushUrlNew"');
+			expect(spyOnSpawn).not.toHaveBeenCalled();
 		});
 	});
 
@@ -6277,6 +6332,27 @@ describe('DataSource', () => {
 
 			// Assert
 			expect(result).toBe('error message');
+		});
+
+		it('Should reset uncommitted changes using the "HEAD" sentinel, without rejecting it as an invalid commit hash', async () => {
+			// Setup
+			mockGitSuccessOnce();
+
+			// Run
+			const result = await dataSource.resetToCommit('/path/to/repo', 'HEAD', GitResetMode.Hard);
+
+			// Assert
+			expect(result).toBe(null);
+			expect(spyOnSpawn).toBeCalledWith('/path/to/git', ['reset', '--hard', 'HEAD'], expect.objectContaining({ cwd: '/path/to/repo' }));
+		});
+
+		it('Should return an error message when an invalid commit hash is provided', async () => {
+			// Run
+			const result = await dataSource.resetToCommit('/path/to/repo', 'not-a-valid-hash', GitResetMode.Hard);
+
+			// Assert
+			expect(result).toBe('Invalid commit hash was provided for "commit"');
+			expect(spyOnSpawn).not.toHaveBeenCalled();
 		});
 	});
 

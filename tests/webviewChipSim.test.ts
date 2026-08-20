@@ -102,7 +102,7 @@ describe('Webview Gerrit chip simulation', () => {
 		loadWebview();
 	});
 
-	test('clicking a chip sends loadCommits with the updated filter and re-renders on response', () => {
+	test('clicking a chip sends loadCommits with the updated filter and re-renders on response', async () => {
 		// 1. Extension responds to the initial loadRepoInfo
 		const repoInfoMsg = sentMessages.find((m) => m.command === 'loadRepoInfo');
 		expect(repoInfoMsg).toBeDefined();
@@ -130,7 +130,8 @@ describe('Webview Gerrit chip simulation', () => {
 		mergedChip.click();
 		expect(mergedChip.classList.contains('active')).toBe(true);
 
-		// 4. A new loadCommits request must be sent, carrying merged: true
+		// 4. A new loadCommits request must be sent (after the 120ms debounce), carrying merged: true
+		await new Promise((resolve) => setTimeout(resolve, 150));
 		const loadMsg2 = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(loadMsg2.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
 
@@ -206,7 +207,7 @@ describe('Webview Gerrit chip simulation', () => {
 		expect(createdEvent.classList.contains('expanded')).toBe(false);
 	});
 
-	test('the chip selection is restored when the webview is reloaded (e.g. switching away from the panel and back)', () => {
+	test('the chip selection is restored when the webview is reloaded (e.g. switching away from the panel and back)', async () => {
 		// 1. Initial load (default filter: only open changes)
 		respondToRepoInfo();
 		window.dispatchEvent(new MessageEvent('message', { data: {
@@ -217,6 +218,7 @@ describe('Webview Gerrit chip simulation', () => {
 		// 2. Click the "Merged" chip and let the extension respond (served from the Gerrit cache)
 		const mergedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
 		mergedChip.click();
+		await new Promise((resolve) => setTimeout(resolve, 150)); // wait for the chip toggle debounce
 		const loadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(loadMsg.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
 		expect(loadMsg.gerritForceRefresh).toBe(false); // chip toggles must use the Gerrit cache
@@ -246,6 +248,71 @@ describe('Webview Gerrit chip simulation', () => {
 		const reloadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(reloadMsg.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
 		expect(reloadMsg.gerritForceRefresh).toBe(false);
+	});
+
+	test('meta rows expanded by the toggle appear newest → oldest, matching the review dialog', () => {
+		respondToRepoInfo();
+		const loadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
+		window.dispatchEvent(new MessageEvent('message', { data: {
+			command: 'loadCommits', refreshId: loadMsg.refreshId, error: null, head: 'develop', tags: [],
+			moreAvailable: false, onlyFollowFirstParent: false,
+			gerritStates: [{
+				change: 41456, patchset: 1, codeReview: 2, verified: 0, status: 'new', wip: false,
+				headHash: COMMIT_MERGED.hash,
+				events: [
+					{ type: 'merged', patchset: 1, timestamp: 1755000000, raw: 'Newest event' },
+					{ type: 'commented', patchset: 1, timestamp: 1754900000, raw: 'Middle event' },
+					{ type: 'created', patchset: 1, timestamp: 1754800000, raw: 'Oldest event' }
+				],
+				url: null
+			}],
+			commits: [COMMIT_MERGED, COMMIT_PLAIN]
+		} }));
+
+		// Toggle open: the meta rows must appear in the same order as state.events (newest first)
+		expect(document.querySelectorAll('tr.gg-meta-row').length).toBe(0);
+		(document.querySelector('.gg-meta-chip') as any).click();
+		const rows = Array.from(document.querySelectorAll('tr.gg-meta-row')).map((r: any) => r.textContent);
+		expect(rows.length).toBe(3);
+		expect(rows[0]).toContain('Newest event');
+		expect(rows[1]).toContain('Middle event');
+		expect(rows[2]).toContain('Oldest event');
+
+		// The review dialog must show the events in the same order
+		(document.querySelector('.gitRef.gerrit') as any).click();
+		const dialogEvents = Array.from(document.querySelectorAll('.gg-event-text')).map((e: any) => e.textContent);
+		expect(dialogEvents.length).toBe(3);
+		expect(dialogEvents[0]).toContain('Newest event');
+		expect(dialogEvents[1]).toContain('Middle event');
+		expect(dialogEvents[2]).toContain('Oldest event');
+	});
+
+	test('toggling the meta chip open and closed re-renders without sending a request', () => {
+		respondToRepoInfo();
+		const loadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
+		window.dispatchEvent(new MessageEvent('message', { data: {
+			command: 'loadCommits', refreshId: loadMsg.refreshId, error: null, head: 'develop', tags: [],
+			moreAvailable: false, onlyFollowFirstParent: false,
+			gerritStates: [{
+				change: 41456, patchset: 1, codeReview: 2, verified: 0, status: 'new', wip: false,
+				headHash: COMMIT_MERGED.hash,
+				events: [{ type: 'created', patchset: 1, timestamp: 1754800000, raw: 'Create change' }],
+				url: null
+			}],
+			commits: [COMMIT_MERGED, COMMIT_PLAIN]
+		} }));
+		const requestsBefore = sentMessages.length;
+
+		const getChip = (): any => document.querySelector('.gg-meta-chip');
+		expect(getChip().classList.contains('expanded')).toBe(false);
+		getChip().click();
+		// The toggle re-renders the table, so the chip element must be re-queried afterwards
+		expect(getChip().classList.contains('expanded')).toBe(true);
+		expect(document.querySelectorAll('tr.gg-meta-row').length).toBe(1);
+		getChip().click();
+		expect(getChip().classList.contains('expanded')).toBe(false);
+		expect(document.querySelectorAll('tr.gg-meta-row').length).toBe(0);
+		expect(sentMessages.length).toBe(requestsBefore); // purely client-side toggle
 	});
 
 	test('clicking Refresh forces a Gerrit re-fetch, while normal loads use the cache', () => {

@@ -129,7 +129,7 @@ class Config {
 		const fetchMode = this.config.get<string>('gerrit.fetchMode', 'latest');
 		const patchsets = this.config.get<string>('gerrit.patchsets', 'latest');
 		const showMetaCommits = this.config.get<string>('gerrit.showMetaCommits', 'collapsed');
-		const statusFilterConfig = this.config.get<any>('gerrit.statusFilter', {});
+		const statusFilterConfig = this.config.get<any>('gerrit.statusFilter', {}) || {};
 		return {
 			enabled: !!this.config.get('gerrit.enabled', true),
 			remote: this.config.get<string>('gerrit.remote', 'origin'),

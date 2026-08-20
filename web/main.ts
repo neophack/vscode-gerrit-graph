@@ -241,15 +241,20 @@ class GitGraphView {
 			// Apply the file path filter the view was requested to be loaded with
 			const newFilter = loadViewTo.filterPath !== '' ? loadViewTo.filterPath : null;
 			filterChanged = newFilter !== this.commitPathFilter;
-			this.commitPathFilter = newFilter;
-			this.renderFilterButton();
 		}
 
 		if (this.currentRepo !== newRepo) {
 			this.loadRepo(newRepo);
+			// loadRepo resets the path filter, so re-apply it before the commits are requested
+			if (loadViewTo !== null && loadViewTo.repo === newRepo && typeof loadViewTo.filterPath === 'string') {
+				this.commitPathFilter = loadViewTo.filterPath !== '' ? loadViewTo.filterPath : null;
+				this.renderFilterButton();
+			}
 			return true;
 		} else if (filterChanged) {
 			// The repository is already loaded, but the path filter changed: reload the commits
+			this.commitPathFilter = loadViewTo !== null && typeof loadViewTo.filterPath === 'string' && loadViewTo.filterPath !== '' ? loadViewTo.filterPath : null;
+			this.renderFilterButton();
 			this.refresh(false);
 			return false;
 		} else {
@@ -269,7 +274,10 @@ class GitGraphView {
 		this.gitTags = [];
 		this.currentBranches = null;
 		this.currentAuthors = null;
+		this.commitPathFilter = null;
+		this.compareSourceHash = null;
 		this.renderFetchButton();
+		this.renderFilterButton();
 		this.closeCommitDetails(false);
 		this.settingsWidget.close();
 		this.saveState();
@@ -569,7 +577,7 @@ class GitGraphView {
 				if (msg.gerritStates !== null) {
 					for (const state of msg.gerritStates) newStates[state.headHash] = state;
 				}
-				this.gerritStatesDirty = JSON.stringify(this.gerritStates) !== JSON.stringify(newStates);
+				this.gerritStatesDirty = !gerritStatesEqual(this.gerritStates, newStates);
 				this.gerritStates = newStates;
 				this.loadCommits(msg.commits, msg.head, msg.tags, msg.moreCommitsAvailable, msg.onlyFollowFirstParent, msg.gerritPending === true);
 			}
@@ -1111,7 +1119,7 @@ class GitGraphView {
 	}
 
 	private getGerritBadgeHtml(state: GG.GerritChangeState) {
-		const score = (value: number) => (value > 0 ? '+' : '') + value;
+		const score = formatGerritScore;
 		let progress = '';
 		if (this.config.gerrit.showReviewProgress) {
 			progress = '<span class="gg-label cr' + state.codeReview + '">CR' + score(state.codeReview) + '</span>';
@@ -1150,10 +1158,10 @@ class GitGraphView {
 	 * @param colVisibility The visibility of the optional columns.
 	 */
 	private getGerritMetaRowsHtml(state: GG.GerritChangeState, hash: string, colVisibility: { date: boolean; author: boolean; commit: boolean }) {
-		const events = state.events.slice().reverse(); // display oldest → newest
+		const events = state.events; // display newest → oldest, matching the review dialog
 		let html = '';
 		for (const event of events) {
-			const text = escapeHtml(event.raw) + (event.labels !== undefined ? ' (' + event.labels.map((label) => escapeHtml(label.name) + (label.value > 0 ? '+' : '') + label.value).join(', ') + ')' : '');
+			const text = formatGerritEventText(event);
 			html += '<tr class="gg-meta-row" data-change="' + state.change + '" data-hash="' + escapeHtml(hash) + '" title="' + escapeHtml(event.raw) + '"><td></td><td>' +
 				'<div class="gg-meta-event">' +
 				'<span class="gg-meta-event-icon">' + (GERRIT_EVENT_ICONS[event.type] || '•') + '</span>' +
@@ -1179,7 +1187,7 @@ class GitGraphView {
 	}
 
 	private showGerritDialog(state: GG.GerritChangeState) {
-		const score = (value: number) => (value > 0 ? '+' : '') + value;
+		const score = formatGerritScore;
 		const statusText = state.status === 'merged' ? 'Merged' : state.status === 'abandoned' ? 'Abandoned' : (state.wip ? 'Work in Progress' : 'Open (awaiting review)');
 		const icons = GERRIT_EVENT_ICONS;
 		// state.events is newest → oldest: the change author is the actor of the oldest "Create change" event
@@ -1195,7 +1203,7 @@ class GitGraphView {
 				'<div class="gg-event-row">' +
 				(detail !== '' ? '<span class="gg-event-toggle">' + SVG_ICONS.chevronDown + '</span>' : '') +
 				'<span class="gg-event-icon">' + (icons[event.type] || '\u2022') + '</span>' +
-				'<span class="gg-event-text">' + escapeHtml(event.raw) + (event.labels !== undefined ? ' (' + event.labels.map((label) => escapeHtml(label.name) + score(label.value)).join(', ') + ')' : '') + '</span>' +
+				'<span class="gg-event-text">' + formatGerritEventText(event) + '</span>' +
 				(event.reviewer !== undefined ? '<span class="gg-event-reviewer">' + escapeHtml(event.reviewer) + '</span>' : '') +
 				'<span class="gg-event-date">' + formatShortDate(event.timestamp).formatted + '</span>' +
 				'</div>' +
@@ -1751,24 +1759,28 @@ class GitGraphView {
 				title: 'Submit for Review' + ELLIPSIS,
 				visible: this.config.gerrit.enabled && this.config.gerrit.showPushButton && hash === this.commitHead,
 				onClick: () => this.gerritSubmitReviewAction()
-			}, {
-				title: 'Fixup into HEAD',
-				visible: this.config.gerrit.enabled && this.commitHead !== null && hash !== this.commitHead,
-				onClick: () => {
-					dialog.showForm('Are you sure you want to fixup the <b>uncommitted changes</b> into commit <b><i>' + abbrevCommit(hash) + '</i></b> (autosquash rebase, preserving its Change-Id)?', [], 'Yes, fixup', () => {
-						runAction({ command: 'gerritAutosquash', repo: this.currentRepo, commitHash: hash, mode: 'fixup' }, 'Fixing up Commit');
-					}, target);
-				}
-			}, {
-				title: 'Squash into HEAD',
-				visible: this.config.gerrit.enabled && this.commitHead !== null && hash !== this.commitHead,
-				onClick: () => {
-					dialog.showForm('Are you sure you want to squash the <b>uncommitted changes</b> into commit <b><i>' + abbrevCommit(hash) + '</i></b> (autosquash rebase, messages combined)?', [], 'Yes, squash', () => {
-						runAction({ command: 'gerritAutosquash', repo: this.currentRepo, commitHash: hash, mode: 'squash' }, 'Squashing Commit');
-					}, target);
-				}
-			}
+			}, this.getGerritAutosquashMenuItem('fixup', hash, target), this.getGerritAutosquashMenuItem('squash', hash, target)
 		]];
+	}
+
+	/**
+	 * Build the "Fixup into HEAD" / "Squash into HEAD" commit context menu item.
+	 * @param mode Fold the uncommitted changes into the commit preserving its Change-Id (fixup), or combining messages (squash).
+	 * @param hash The hash of the commit to autosquash into.
+	 * @param target The context menu's target.
+	 */
+	private getGerritAutosquashMenuItem(mode: 'fixup' | 'squash', hash: string, target: DialogTarget & CommitTarget): ContextMenuAction {
+		return {
+			title: mode === 'fixup' ? 'Fixup into HEAD' : 'Squash into HEAD',
+			visible: this.config.gerrit.enabled && this.commitHead !== null && hash !== this.commitHead,
+			onClick: () => {
+				const action = mode === 'fixup' ? 'fixup the' : 'squash the';
+				const detail = mode === 'fixup' ? 'preserving its Change-Id' : 'messages combined';
+				dialog.showForm('Are you sure you want to ' + action + ' <b>uncommitted changes</b> into commit <b><i>' + abbrevCommit(hash) + '</i></b> (autosquash rebase, ' + detail + ')?', [], mode === 'fixup' ? 'Yes, fixup' : 'Yes, squash', () => {
+					runAction({ command: 'gerritAutosquash', repo: this.currentRepo, commitHash: hash, mode: mode }, mode === 'fixup' ? 'Fixing up Commit' : 'Squashing Commit');
+				}, target);
+			}
+		};
 	}
 
 	private getRemoteBranchContextMenuActions(remote: string, target: DialogTarget & RefTarget): ContextMenuActions {
@@ -3470,6 +3482,7 @@ class GitGraphView {
 	private editCommitMessageAction(target: DialogTarget & CommitTarget) {
 		const hash = target.hash;
 		const commit = this.commits[this.commitLookup[hash]];
+		if (commit === undefined) return; // The commit is no longer loaded (e.g. after a refresh)
 
 		dialog.showForm(
 			`Edit commit message for <b><i>${abbrevCommit(hash)}</i></b>:`,
@@ -4559,6 +4572,44 @@ function haveFilesChanged(oldFiles: ReadonlyArray<GG.GitFileChange> | null, newF
 
 function abbrevCommit(commitHash: string) {
 	return commitHash.substring(0, 8);
+}
+
+/** Format a Gerrit vote/score value with an explicit '+' sign for positive values (e.g. "+2", "-1", "0"). */
+function formatGerritScore(value: number) {
+	return (value > 0 ? '+' : '') + value;
+}
+
+/** Format a Gerrit event's summary text, with its labels (if any) appended (e.g. "Patch Set 2: (Code-Review+2)"). */
+function formatGerritEventText(event: GG.GerritChangeEvent) {
+	return escapeHtml(event.raw) + (event.labels !== undefined ? ' (' + event.labels.map((label) => escapeHtml(label.name) + formatGerritScore(label.value)).join(', ') + ')' : '');
+}
+
+function gerritChangeEventsEqual(a: ReadonlyArray<GG.GerritChangeEvent>, b: ReadonlyArray<GG.GerritChangeEvent>) {
+	return arraysEqual(a, b, (x, y) =>
+		x.type === y.type && x.patchset === y.patchset && x.reviewer === y.reviewer &&
+		x.timestamp === y.timestamp && x.raw === y.raw && x.rawFull === y.rawFull &&
+		(x.labels === undefined || y.labels === undefined
+			? x.labels === y.labels
+			: arraysEqual(x.labels, y.labels, (p, q) => p.name === q.name && p.value === q.value))
+	);
+}
+
+/**
+ * Are two Gerrit change state maps equal. Short-circuits on the first difference found, avoiding
+ * the cost of JSON.stringify-ing the full (potentially large) event history of every change just
+ * to detect whether anything actually changed.
+ */
+function gerritStatesEqual(a: { [hash: string]: GG.GerritChangeState }, b: { [hash: string]: GG.GerritChangeState }) {
+	const aHashes = Object.keys(a);
+	if (aHashes.length !== Object.keys(b).length) return false;
+	return aHashes.every((hash) => {
+		const x = a[hash], y = b[hash];
+		return typeof y !== 'undefined' &&
+			x.change === y.change && x.patchset === y.patchset && x.codeReview === y.codeReview &&
+			x.verified === y.verified && x.status === y.status && x.wip === y.wip &&
+			x.headHash === y.headHash && x.url === y.url &&
+			gerritChangeEventsEqual(x.events, y.events);
+	});
 }
 
 function getRepoDropdownOptions(repos: Readonly<GG.GitRepoSet>) {

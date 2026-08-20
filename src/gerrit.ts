@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { ErrorInfo, GerritChangeEvent, GerritChangeState, GerritChangeStatus, GerritPatchsetsMode } from './types';
+import { evalPromises } from './utils';
 
 /**
  * A minimal structural interface for running Git commands (implemented by `DataSource`).
@@ -131,14 +132,10 @@ export function buildFetchRefspecs(changes: Map<number, number[]>, remote: strin
 }
 
 /**
- * Compute the local refs (under `refs/remotes/<remote>/changes/`) that should be kept for a set of changes.
+ * Compute the local ref prefixes (under `refs/remotes/<remote>/changes/`) that should be kept for a set of changes.
  */
-export function buildKeepPatterns(changes: Map<number, number[]>, remote: string) {
-	const patterns: string[] = [];
-	for (const change of changes.keys()) {
-		patterns.push('refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/');
-	}
-	return patterns;
+export function buildKeepPatterns(changes: ReadonlyArray<number>, remote: string) {
+	return changes.map((change) => 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/');
 }
 
 /* NoteDb Meta Parsing */
@@ -515,7 +512,7 @@ export class GerritDataSource {
 	 * @returns The ErrorInfo of the pruning (NULL => all refs were pruned successfully).
 	 */
 	public async pruneLocalChanges(repo: string, remote: string, keepChanges: ReadonlyArray<number>): Promise<ErrorInfo> {
-		const prefixes = keepChanges.map((change) => 'refs/remotes/' + remote + '/changes/' + changeShard(change) + '/' + change + '/');
+		const prefixes = buildKeepPatterns(keepChanges, remote);
 		const refs = await this.listLocalChangeRefs(repo, remote);
 		const staleRefs = refs.filter((ref) => !prefixes.some((prefix) => ref.startsWith(prefix)));
 		if (staleRefs.length === 0) return null;
@@ -584,18 +581,8 @@ export class GerritDataSource {
 			}
 		}
 
-		let next = 0;
-		const workers: Promise<void>[] = [];
-		const workerCount = Math.min(META_PARSE_CONCURRENCY, pending.length);
-		for (let i = 0; i < workerCount; i++) {
-			workers.push((async () => {
-				while (next < pending.length) {
-					const item = pending[next++];
-					results.set(item.change, await this.parseMetaLog(repo, item.change, item.metaRef, item.hash, urlBase));
-				}
-			})());
-		}
-		await Promise.all(workers);
+		const parsed = await evalPromises(pending, META_PARSE_CONCURRENCY, (item) => this.parseMetaLog(repo, item.change, item.metaRef, item.hash, urlBase));
+		pending.forEach((item, i) => results.set(item.change, parsed[i]));
 
 		// Preserve the input order (the workers complete in a nondeterministic order)
 		const ordered = new Map<number, GerritChangeState | null>();

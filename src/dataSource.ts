@@ -55,7 +55,7 @@ export class DataSource extends Disposable {
 	 * undefined are skipped.
 	 * @returns An error message if any value is unsafe, otherwise null.
 	 */
-	private static checkUnsafeGitArgs(...checks: [string, string | null | undefined, 'hash' | 'ref' | 'stash'][]): ErrorInfo {
+	private static checkUnsafeGitArgs(...checks: [string, string | null | undefined, 'hash' | 'ref' | 'stash' | 'url'][]): ErrorInfo {
 		for (const [name, value, kind] of checks) {
 			if (value === null || value === undefined) continue;
 			let valid: boolean;
@@ -63,11 +63,16 @@ export class DataSource extends Disposable {
 				valid = isValidCommitHash(value);
 			} else if (kind === 'stash') {
 				valid = isSafeStashSelector(value);
+			} else if (kind === 'url') {
+				// URLs (including the "" placeholder used when no URL is set) can't be validated as
+				// strictly as a ref name, but a leading '-' would still let the value be misinterpreted
+				// as a git option instead of a positional argument
+				valid = value[0] !== '-';
 			} else {
 				valid = isSafeRefName(value);
 			}
 			if (!valid) {
-				const label = kind === 'hash' ? 'commit hash' : (kind === 'stash' ? 'stash selector' : 'reference name');
+				const label = kind === 'hash' ? 'commit hash' : (kind === 'stash' ? 'stash selector' : (kind === 'url' ? 'URL' : 'reference name'));
 				return 'Invalid ' + label + ' was provided for "' + name + '"';
 			}
 		}
@@ -228,8 +233,11 @@ export class DataSource extends Disposable {
 	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null, gerritShowChangeRefs: boolean = false, filterPath: string | null = null): Promise<GitCommitData> {
 		const config = getConfig();
 		// Branch names are received from the webview and passed to git log as bare arguments, so
-		// drop any that could be misinterpreted as git options (argument injection)
-		const refs = branches === null ? null : branches.filter((branch) => isSafeRefName(branch) || isValidCommitHash(branch));
+		// drop any that could be misinterpreted as git options (argument injection). Custom Branch
+		// Glob Patterns are the one legitimate exception: they are always of the form `--glob=<pattern>`
+		// (see Config.customBranchGlobPatterns), a single argv token that git can't reinterpret as a
+		// different option, so they're allowed through even though they start with `-`.
+		const refs = branches === null ? null : branches.filter((branch) => isSafeRefName(branch) || isValidCommitHash(branch) || branch.startsWith('--glob='));
 		// The commit log, refs and uncommitted changes status are all started before any of them
 		// is awaited, so that the three Git processes run in parallel
 		const logPromise = this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes, gerritRefs, filterPath);
@@ -736,7 +744,7 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async addRemote(repo: string, name: string, url: string, pushUrl: string | null, fetch: boolean) {
-		const unsafeArgs = DataSource.checkUnsafeGitArgs(['name', name, 'ref']);
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(['name', name, 'ref'], ['url', url, 'url'], ['pushUrl', pushUrl, 'url']);
 		if (unsafeArgs !== null) return unsafeArgs;
 
 		let status = await this.runGitCommand(['remote', 'add', name, url], repo);
@@ -775,7 +783,11 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public async editRemote(repo: string, nameOld: string, nameNew: string, urlOld: string | null, urlNew: string | null, pushUrlOld: string | null, pushUrlNew: string | null) {
-		const unsafeArgs = DataSource.checkUnsafeGitArgs(['nameOld', nameOld, 'ref'], ['nameNew', nameNew, 'ref']);
+		const unsafeArgs = DataSource.checkUnsafeGitArgs(
+			['nameOld', nameOld, 'ref'], ['nameNew', nameNew, 'ref'],
+			['urlOld', urlOld, 'url'], ['urlNew', urlNew, 'url'],
+			['pushUrlOld', pushUrlOld, 'url'], ['pushUrlNew', pushUrlNew, 'url']
+		);
 		if (unsafeArgs !== null) return unsafeArgs;
 
 		if (nameOld !== nameNew) {
@@ -1321,8 +1333,11 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public resetToCommit(repo: string, commit: string, resetMode: GitResetMode) {
-		const unsafeArgs = DataSource.checkUnsafeGitArgs(['commit', commit, 'hash']);
-		if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+		if (commit !== 'HEAD') {
+			// 'HEAD' is the sentinel used to reset uncommitted changes, and isn't a commit hash
+			const unsafeArgs = DataSource.checkUnsafeGitArgs(['commit', commit, 'hash']);
+			if (unsafeArgs !== null) return Promise.resolve(unsafeArgs);
+		}
 
 		return this.runGitCommand(['reset', '--' + resetMode, commit], repo);
 	}

@@ -1,3 +1,5 @@
+import * as vscode from './mocks/vscode';
+jest.mock('vscode', () => vscode, { virtual: true });
 import {
 	GerritDataSource,
 	buildFetchRefspecs,

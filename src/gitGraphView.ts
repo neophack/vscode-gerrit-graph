@@ -26,7 +26,6 @@ import { Disposable, toDisposable } from './utils/disposable';
  * The status filter is applied when the cache is served, so that switching filters is instant.
  */
 interface GerritCacheEntry {
-	repo: string;
 	states: GerritChangeState[];
 	patchsets: Map<number, number[]>;
 }
@@ -1030,7 +1029,7 @@ export class GitGraphView extends Disposable {
 			const changes = config.fetchMode === 'all'
 				? await gerrit.listRemoteChanges(repo, remote)
 				: limitChanges(await gerrit.listRemoteChanges(repo, remote), config.fetchLimit);
-			const entry: GerritCacheEntry = { repo: repo, states: [], patchsets: new Map() };
+			const entry: GerritCacheEntry = { states: [], patchsets: new Map() };
 			if (changes.size > 0) {
 				// Resolve the change URL base concurrently with the fetch (it doesn't depend on it)
 				const urlBasePromise = gerrit.getChangeUrlBase(repo, remote);
@@ -1155,22 +1154,8 @@ export class GitGraphView extends Disposable {
 	 * Ensure that HEAD has a Change-Id footer, amending the commit if (and only if) it is safe to do so.
 	 * @returns The ErrorInfo from the operation (NULL => HEAD already had a Change-Id, or one was amended).
 	 */
-	private async ensureChangeId(repo: string): Promise<ErrorInfo> {
-		const message = await this.getHeadCommitMessage(repo);
-		if (hasChangeId(message)) return null; // nothing to amend
-
-		const remotes = await this.getHeadContainingRemotes(repo);
-		if (remotes.length > 0) return this.getPushedChangeIdError(remotes[0]);
-
-		const changeId = await this.generateHeadChangeId(repo);
-		const action = await vscode.window.showInformationMessage(
-			'HEAD doesn\'t have a Gerrit Change-Id. Amend it with Change-Id ' + changeId.substring(0, 12) + '... before submitting for review?',
-			'Yes, amend and push',
-			'No, cancel'
-		);
-		if (action !== 'Yes, amend and push') return 'Aborted: HEAD has no Change-Id.';
-
-		return this.amendHeadWithChangeId(repo, message, changeId);
+	private ensureChangeId(repo: string): Promise<ErrorInfo> {
+		return this.resolveHeadChangeId(repo, true).then((result) => result.error);
 	}
 
 	/**
@@ -1178,7 +1163,19 @@ export class GitGraphView extends Disposable {
 	 * HEAD is only amended when it has no Change-Id yet, and hasn't been pushed to any remote.
 	 * @returns The ErrorInfo of the operation, the Change-Id of HEAD and whether it was newly amended.
 	 */
-	private async gerritAmendChangeId(repo: string): Promise<{ error: ErrorInfo, changeId: string | null, amended: boolean }> {
+	private gerritAmendChangeId(repo: string): Promise<{ error: ErrorInfo, changeId: string | null, amended: boolean }> {
+		return this.resolveHeadChangeId(repo, false);
+	}
+
+	/**
+	 * Shared implementation of `ensureChangeId` and `gerritAmendChangeId`: ensure that HEAD has a
+	 * Change-Id footer, amending the commit if (and only if) it is safe to do so.
+	 * @param repo The path of the repository.
+	 * @param confirm Ask the user to confirm the amend before performing it (used by the "Submit for
+	 * Review" flow, where amending is a side effect of another action, rather than the action itself).
+	 * @returns The ErrorInfo of the operation, the Change-Id of HEAD and whether it was newly amended.
+	 */
+	private async resolveHeadChangeId(repo: string, confirm: boolean): Promise<{ error: ErrorInfo, changeId: string | null, amended: boolean }> {
 		try {
 			const message = await this.getHeadCommitMessage(repo);
 			const existing = extractChangeId(message);
@@ -1188,6 +1185,15 @@ export class GitGraphView extends Disposable {
 			if (remotes.length > 0) return { error: this.getPushedChangeIdError(remotes[0]), changeId: null, amended: false };
 
 			const changeId = await this.generateHeadChangeId(repo);
+			if (confirm) {
+				const action = await vscode.window.showInformationMessage(
+					'HEAD doesn\'t have a Gerrit Change-Id. Amend it with Change-Id ' + changeId.substring(0, 12) + '... before submitting for review?',
+					'Yes, amend and push',
+					'No, cancel'
+				);
+				if (action !== 'Yes, amend and push') return { error: 'Aborted: HEAD has no Change-Id.', changeId: null, amended: false };
+			}
+
 			const error = await this.amendHeadWithChangeId(repo, message, changeId);
 			return { error: error, changeId: changeId, amended: error === null };
 		} catch (errorMessage) {
