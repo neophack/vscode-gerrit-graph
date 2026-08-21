@@ -4,12 +4,12 @@
 
 View a Git Graph of your repository, and perform Git actions from the graph. This fork includes critical fixes for recent VS Code versions and new features not present in the original.
 
-**Source Code**: [GitHub](https://github.com/neophack/vscode-gerrit-graph)
+**Source Code**: [GitHub](https://github.com/neophack/vscode-review-graph)
 
-For any issues or advice, you can find the pull requests page [here](https://github.com/neophack/vscode-gerrit-graph/pulls).
+For any issues or advice, you can find the pull requests page [here](https://github.com/neophack/vscode-review-graph/pulls).
 ## Resources
 
-*   [Issues](https://github.com/neophack/vscode-gerrit-graph/issues)
+*   [Issues](https://github.com/neophack/vscode-review-graph/issues)
 *   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=neophack.gerrit-graph)
 *   [Open VSX Registry](https://open-vsx.org/extension/neophack/gerrit-graph) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
 

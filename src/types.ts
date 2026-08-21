@@ -444,7 +444,6 @@ export interface ContextMenuActionsVisibility {
 		readonly reset: boolean;
 			readonly undo: boolean;
 			readonly editMessage: boolean;
-			readonly bisect: boolean;
 			readonly copyHash: boolean;
 		readonly copySubject: boolean;
 	};
@@ -1082,7 +1081,7 @@ export interface ResponseLoadCommits extends ResponseWithErrorInfo {
 	readonly tags: string[];
 	readonly moreCommitsAvailable: boolean;
 	readonly onlyFollowFirstParent: boolean;
-	readonly gerritStates: GerritChangeState[] | null; // null => Gerrit integration disabled
+	readonly gerritStates: GerritChangeState[] | null; // null => Gerrit integration disabled; otherwise ALL cached states (the Webview applies the status filter locally)
 	readonly gerritPending?: boolean; // true => the Gerrit data is still loading asynchronously: a final loadCommits response with the fresh Gerrit data follows
 }
 
@@ -1111,43 +1110,6 @@ export interface ResponseLoadRepoInfo extends ResponseWithErrorInfo {
 	readonly remotes: ReadonlyArray<string>;
 	readonly stashes: ReadonlyArray<GitStash>;
 	readonly isRepo: boolean;
-	readonly bisect: BisectInfo | null; // the current Git bisect state, NULL => not requested / not a repo
-}
-
-/* Git Bisect Types */
-
-export interface BisectInfo {
-	readonly inProgress: boolean; // TRUE => a Git bisect session is in progress
-	readonly goodHashes: string[]; // the hashes marked as good
-	readonly badHashes: string[]; // the hashes marked as bad
-	readonly firstBadCommit: string | null; // the first bad commit found by a converged bisect, NULL => not converged
-}
-
-export interface RequestBisectStart extends RepoRequest {
-	readonly command: 'bisectStart';
-	readonly badHash: string; // the hash of the bad commit
-	readonly goodHash: string | null; // the hash of the good commit, NULL => none
-}
-export interface ResponseBisectStart extends ResponseWithErrorInfo {
-	readonly command: 'bisectStart';
-	readonly firstBadCommit: string | null;
-}
-
-export interface RequestBisectMark extends RepoRequest {
-	readonly command: 'bisectMark';
-	readonly mark: 'good' | 'bad' | 'skip';
-	readonly commitHash: string | null; // the hash to mark, NULL => the current bisect commit
-}
-export interface ResponseBisectMark extends ResponseWithErrorInfo {
-	readonly command: 'bisectMark';
-	readonly firstBadCommit: string | null;
-}
-
-export interface RequestBisectReset extends RepoRequest {
-	readonly command: 'bisectReset';
-}
-export interface ResponseBisectReset extends ResponseWithErrorInfo {
-	readonly command: 'bisectReset';
 }
 
 export interface RequestLoadRepos extends BaseMessage {
@@ -1468,9 +1430,6 @@ export type RequestMessage =
 	RequestAddRemote
 	| RequestAddTag
 	| RequestApplyStash
-	| RequestBisectStart
-	| RequestBisectMark
-	| RequestBisectReset
 	| RequestBranchFromStash
 	| RequestCheckoutBranch
 	| RequestCheckoutCommit
@@ -1545,9 +1504,6 @@ export type ResponseMessage =
 	ResponseAddRemote
 	| ResponseAddTag
 	| ResponseApplyStash
-	| ResponseBisectStart
-	| ResponseBisectMark
-	| ResponseBisectReset
 	| ResponseBranchFromStash
 	| ResponseCheckoutBranch
 	| ResponseCheckoutCommit

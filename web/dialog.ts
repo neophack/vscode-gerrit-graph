@@ -453,7 +453,7 @@ class Dialog {
 		if (commitIndex > -1) {
 			// The commit still exists
 
-			const commitElem = findCommitElemWithId(getCommitElems(), commitIndex);
+			const commitElem = findCommitElemWithId(commitIndex);
 			if (commitElem !== null) {
 				if (typeof this.target.ref === 'undefined') {
 					// Dialog is only dependent on the commit itself

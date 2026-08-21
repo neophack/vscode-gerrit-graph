@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Logger } from './logger';
 import { getPathFromUri } from './utils';
 
-const FILE_CHANGE_REGEX = /(^\.git\/(config|index|HEAD|BISECT_LOG|BISECT_START|BISECT_EXPECTED_REV|refs\/bisect\/.*|refs\/stash|refs\/heads\/.*|refs\/remotes\/.*|refs\/tags\/.*)$)|(^(?!\.git).*$)|(^\.git[^\/]+$)/;
+const FILE_CHANGE_REGEX = /(^\.git\/(config|index|HEAD|refs\/stash|refs\/heads\/.*|refs\/remotes\/.*|refs\/tags\/.*)$)|(^(?!\.git).*$)|(^\.git[^\/]+$)/;
 
 /**
  * Watches a Git repository for file events.
@@ -10,6 +10,7 @@ const FILE_CHANGE_REGEX = /(^\.git\/(config|index|HEAD|BISECT_LOG|BISECT_START|B
 export class RepoFileWatcher {
 	private readonly logger: Logger;
 	private readonly repoChangeCallback: () => void;
+	private readonly repoConfigChangeCallback: (() => void) | null;
 	private repo: string | null = null;
 	private fsWatcher: vscode.FileSystemWatcher | null = null;
 	private fsWatcherGit: vscode.FileSystemWatcher | null = null;
@@ -21,10 +22,13 @@ export class RepoFileWatcher {
 	 * Creates a RepoFileWatcher.
 	 * @param logger The Git Graph Logger instance.
 	 * @param repoChangeCallback A callback to be invoked when a file event occurs in the repository.
+	 * @param repoConfigChangeCallback An optional callback to be invoked when the repository's
+	 * `.git/config` file is modified (even while muted, so caches are never left stale).
 	 */
-	constructor(logger: Logger, repoChangeCallback: () => void) {
+	constructor(logger: Logger, repoChangeCallback: () => void, repoConfigChangeCallback: (() => void) | null = null) {
 		this.logger = logger;
 		this.repoChangeCallback = repoChangeCallback;
+		this.repoConfigChangeCallback = repoConfigChangeCallback;
 	}
 
 	/**
@@ -50,6 +54,14 @@ export class RepoFileWatcher {
 		this.fsWatcherGit.onDidDelete(uri => this.refresh(uri));
 
 		this.logger.log('Started watching repo: ' + repo);
+	}
+
+	/**
+	 * Get the repository currently being watched.
+	 * @returns The path of the repository, or NULL if no repository is being watched.
+	 */
+	public getRepo(): string | null {
+		return this.repo;
 	}
 
 	/**
@@ -97,9 +109,15 @@ export class RepoFileWatcher {
 	 * @param uri The URI of the file that the event occurred on.
 	 */
 	private refresh(uri: vscode.Uri) {
-		if (this.muteCount > 0) return;
 		if (this.repo === null) return;
-		if (!getPathFromUri(uri).replace(this.repo + '/', '').match(FILE_CHANGE_REGEX)) return;
+		const relativePath = getPathFromUri(uri).replace(this.repo + '/', '');
+		if (relativePath === '.git/config') {
+			// Config modifications must invalidate caches even while muted (Git actions run by the
+			// Git Graph View itself may change the config), otherwise stale data could be served
+			if (this.repoConfigChangeCallback !== null) this.repoConfigChangeCallback();
+		}
+		if (this.muteCount > 0) return;
+		if (!relativePath.match(FILE_CHANGE_REGEX)) return;
 		if ((new Date()).getTime() < this.resumeAt) return;
 
 		if (this.refreshTimeout !== null) {

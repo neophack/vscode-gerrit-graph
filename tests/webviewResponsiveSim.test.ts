@@ -97,6 +97,10 @@ function loadWebview() {
 	document.body.innerHTML = VIEW_HTML;
 	Object.defineProperty(window, 'outerWidth', { configurable: true, get: () => winSize.w });
 	Object.defineProperty(window, 'outerHeight', { configurable: true, get: () => winSize.h });
+	// The resize handler coalesces bursts of resize events with requestAnimationFrame: run the
+	// frames synchronously so the assertions below can be made immediately after the dispatch
+	window.requestAnimationFrame = (cb: any) => { cb(); return 0; };
+	window.cancelAnimationFrame = () => undefined;
 	(globalThis as any).acquireVsCodeApi = () => ({
 		postMessage: (msg: any) => { sentMessages.push(msg); return undefined; },
 		getState: () => webviewState,
@@ -189,6 +193,34 @@ describe('Webview responsive simulation', () => {
 		const remoteTag = document.querySelector('.gitRef.tag[data-name="v1.9.0"]');
 		expect(remoteTag.dataset.tagtype).toBe('lightweight');
 		expect(remoteTag.querySelector('.gitRefHeadRemote[data-remote="origin"][data-fullref="origin/tags/v1.9.0"]')).not.toBeNull();
+	});
+
+	test('a burst of resize events is coalesced into a single animation frame', () => {
+		respondToRepoInfo();
+		respondToLoadCommits([STASH_COMMIT, D, C, B2, B1, A]);
+
+		// Queue animation frames instead of running them synchronously, and count cancels
+		let frames: any[] = [], cancelled = 0, rafId = 0;
+		window.requestAnimationFrame = (cb: any) => { frames.push(cb); return ++rafId; };
+		window.cancelAnimationFrame = () => { cancelled++; };
+
+		const graphGroupBefore = document.querySelector('#commitGraph svg g');
+		setViewClientWidth(900);
+		window.dispatchEvent(new Event('resize'));
+		window.dispatchEvent(new Event('resize'));
+		window.dispatchEvent(new Event('resize'));
+
+		// The later events superseded the earlier ones' pending frames (coalescing; other
+		// rAF consumers in the webview may cancel additional frames of their own)
+		expect(cancelled).toBeGreaterThanOrEqual(2);
+		// Nothing has been re-rendered yet: the frames are still pending
+		expect(document.querySelector('#commitGraph svg g')).toBe(graphGroupBefore);
+
+		// Flushing the pending frames applies the resize (rendering a fresh graph group)
+		const flush = frames.splice(0);
+		for (const cb of flush) cb();
+		expect(document.querySelector('#commitGraph svg g')).not.toBe(graphGroupBefore);
+		expect(document.querySelectorAll('tr.commit').length).toBe(6);
 	});
 
 	test('resize with an unchanged window size re-renders without disturbing the table', () => {

@@ -288,8 +288,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true, bisect: true,
-					copyHash: true,
+					editMessage: true,					copyHash: true,
 					copySubject: true
 				},
 				commitDetailsViewFile: {
@@ -373,8 +372,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true, bisect: true,
-					copyHash: true,
+					editMessage: true,					copyHash: true,
 					copySubject: true
 				},
 				commitDetailsViewFile: {
@@ -476,8 +474,7 @@ describe('Config', () => {
 					rebase: true,
 					reset: true,
 					undo: true,
-					editMessage: true, bisect: true,
-					copyHash: true,
+					editMessage: true,					copyHash: true,
 					copySubject: true
 				},
 				commitDetailsViewFile: {

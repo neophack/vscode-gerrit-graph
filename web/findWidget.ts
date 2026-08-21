@@ -395,10 +395,10 @@ class FindWidget {
 	private openCommitDetailsViewForCurrentMatchIfEnabled() {
 		if (workspaceState.findOpenCommitDetailsView) {
 			const commitHash = this.getCurrentHash();
-			if (commitHash !== null && !this.view.isCdvOpen(commitHash, null)) {
-				const commitElem = findCommitElemWithId(getCommitElems(), this.view.getCommitId(commitHash));
+			if (commitHash !== null && !isCdvOpen(this.view, commitHash, null)) {
+				const commitElem = findCommitElemWithId(this.view.getCommitId(commitHash));
 				if (commitElem !== null) {
-					this.view.loadCommitDetails(commitElem);
+					loadCommitDetails(this.view, commitElem);
 				}
 			}
 		}

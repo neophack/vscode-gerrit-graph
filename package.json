@@ -20,15 +20,15 @@
 	"categories": [
 		"Other"
 	],
-	"homepage": "https://github.com/neophack/vscode-gerrit-graph",
+	"homepage": "https://github.com/neophack/vscode-review-graph",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/neophack/vscode-gerrit-graph.git"
+		"url": "https://github.com/neophack/vscode-review-graph.git"
 	},
 	"bugs": {
-		"url": "https://github.com/neophack/vscode-gerrit-graph/issues"
+		"url": "https://github.com/neophack/vscode-review-graph/issues"
 	},
-	"qna": "https://github.com/neophack/vscode-gerrit-graph/issues",
+	"qna": "https://github.com/neophack/vscode-review-graph/issues",
 	"license": "SEE LICENSE IN LICENSE",
 	"icon": "resources/icon.png",
 	"engines": {
@@ -269,10 +269,6 @@
 								"reset": {
 									"type": "boolean",
 									"title": "Reset current branch to this Commit..."
-								},
-								"bisect": {
-									"type": "boolean",
-									"title": "Git Bisect (Mark as Good/Bad, Start, End)"
 								},
 								"copyHash": {
 									"type": "boolean",

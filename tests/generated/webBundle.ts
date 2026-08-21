@@ -1492,7 +1492,7 @@ class Graph {
 		const vertexElem = <HTMLElement>event.target;
 		const id = parseInt(vertexElem.dataset.id!);
 		this.tooltipId = id;
-		const commitElem = findCommitElemWithId(getCommitElems(), id);
+		const commitElem = findCommitElemWithId(id);
 		if (commitElem !== null) commitElem.classList.add(CLASS_GRAPH_VERTEX_ACTIVE);
 
 		if (id < this.commits.length && this.commits[id].hash !== UNCOMMITTED) { // Only show tooltip for commits (not the uncommitted changes)
@@ -1600,7 +1600,7 @@ class Graph {
 
 	private closeTooltip() {
 		if (this.tooltipId > -1) {
-			const commitElem = findCommitElemWithId(getCommitElems(), this.tooltipId);
+			const commitElem = findCommitElemWithId(this.tooltipId);
 			if (commitElem !== null) commitElem.classList.remove(CLASS_GRAPH_VERTEX_ACTIVE);
 			this.tooltipId = -1;
 		}

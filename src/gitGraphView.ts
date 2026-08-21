@@ -12,7 +12,7 @@ import { AvatarManager } from './avatarManager';
 import { getConfig } from './config';
 import { DataSource, GitCommitDetailsData, GitConfigKey } from './dataSource';
 import { ExtensionState } from './extensionState';
-import { buildFetchRefspecs, changeShard, extractChangeId, filterChangeStates, generateChangeId, hasChangeId, limitChanges, normalizeGerritFetchLimit, parseLsRemoteChanges } from './gerrit';
+import { buildFetchRefspecs, changeShard, extractChangeId, filterChangeStates, generateChangeId, hasChangeId, limitChanges, normalizeGerritFetchLimit, parseChangeRef, parseLsRemoteChanges } from './gerrit';
 import { Logger } from './logger';
 import { RepoFileWatcher } from './repoFileWatcher';
 import { RepoManager } from './repoManager';
@@ -55,6 +55,7 @@ export class GitGraphView extends Disposable {
 	private gerritCache: Map<string, GerritCacheEntry> = new Map();
 	private gerritFetches: Map<string, Promise<GerritCacheEntry | null>> = new Map();
 	private gerritCacheGeneration: number = 0; // incremented whenever the Gerrit fetch settings change, so stale in-flight fetches don't repopulate the cache
+	private gerritStaleRepos: Set<string> = new Set(); // repos whose cached Gerrit data must be re-fetched from the remote on the next load
 
 	/**
 	 * If a Git Graph View already exists, show and update it. Otherwise, create a Git Graph View.
@@ -192,6 +193,9 @@ export class GitGraphView extends Disposable {
 			if (this.panel.visible) {
 				this.sendMessage({ command: 'refresh' });
 			}
+		}, () => {
+			// The repository's Git config changed: drop the cached config data so the next load is fresh
+			this.dataSource.invalidateConfigCache(this.repoFileWatcher.getRepo());
 		});
 
 		// Render the content of the Webview
@@ -273,22 +277,6 @@ export class GitGraphView extends Disposable {
 				this.sendMessage({
 					command: 'checkoutCommit',
 					error: await this.dataSource.checkoutCommit(msg.repo, msg.commitHash)
-				});
-				break;
-			case 'bisectStart': {
-				const result = await this.dataSource.bisectStart(msg.repo, msg.badHash, msg.goodHash);
-				this.sendMessage({ command: 'bisectStart', error: result.error, firstBadCommit: result.firstBadCommit });
-				break;
-			}
-			case 'bisectMark': {
-				const result = await this.dataSource.bisectMark(msg.repo, msg.mark, msg.commitHash);
-				this.sendMessage({ command: 'bisectMark', error: result.error, firstBadCommit: result.firstBadCommit });
-				break;
-			}
-			case 'bisectReset':
-				this.sendMessage({
-					command: 'bisectReset',
-					error: await this.dataSource.bisectReset(msg.repo)
 				});
 				break;
 			case 'cherrypickCommit':
@@ -487,7 +475,7 @@ export class GitGraphView extends Disposable {
 						gerritStates: null,
 						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
 					});
-				} else if (this.gerritCache.has(msg.repo) && msg.gerritForceRefresh !== true) {
+				} else if (this.gerritCache.has(msg.repo) && msg.gerritForceRefresh !== true && !this.gerritStaleRepos.has(msg.repo)) {
 					// The Gerrit data is already cached: serve it instantly from the cache
 					const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, false);
 					this.sendMessage({
@@ -498,21 +486,41 @@ export class GitGraphView extends Disposable {
 						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
 					});
 				} else {
-					// The Gerrit data isn't cached (or a forced refresh was requested): render the branch
+					// The Gerrit cache is empty (e.g. the extension just started): rebuild it from the
+					// locally cached change refs WITHOUT any network access first, so when local refs
+					// exist the Gerrit data is part of the FIRST response (no pending round-trips that
+					// each re-run getCommits, which dominates the load time on large repositories)
+					if (!this.gerritCache.has(msg.repo)) {
+						const local = await this.buildLocalGerritEntry(msg.repo);
+						if (local !== null) this.gerritCache.set(msg.repo, local);
+					}
+					if (this.gerritCache.has(msg.repo) && msg.gerritForceRefresh !== true && !this.gerritStaleRepos.has(msg.repo)) {
+						// Locally rebuilt Gerrit data: serve it instantly, exactly like the cache branch above
+						const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, false);
+						this.sendMessage({
+							command: 'loadCommits',
+							refreshId: msg.refreshId,
+							onlyFollowFirstParent: msg.onlyFollowFirstParent,
+							gerritStates: gerritData !== null ? gerritData.states : null,
+							...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+						});
+					} else {
+					// No Gerrit data at all, or a forced refresh was requested: render the branch
 					// graph IMMEDIATELY with the stale cached Gerrit data (if any), and complete the
 					// Gerrit pipeline asynchronously. This response is marked `gerritPending`, so the
 					// Git Graph View keeps its loading indicator running until the final response with
 					// the fresh Gerrit data arrives.
-					const staleGerritData = this.peekCachedGerritData(msg.repo, msg.gerritStatusFilter);
-					this.sendMessage({
-						command: 'loadCommits',
-						refreshId: msg.refreshId,
-						onlyFollowFirstParent: msg.onlyFollowFirstParent,
-						gerritPending: true,
-						gerritStates: staleGerritData !== null ? staleGerritData.states : null,
-						...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, staleGerritData !== null ? staleGerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
-					});
-					this.loadCommitsGerritFollowUp(msg, gerritShowChangeRefs); // runs asynchronously (never awaited)
+						const staleGerritData = this.peekCachedGerritData(msg.repo, msg.gerritStatusFilter);
+						this.sendMessage({
+							command: 'loadCommits',
+							refreshId: msg.refreshId,
+							onlyFollowFirstParent: msg.onlyFollowFirstParent,
+							gerritPending: true,
+							gerritStates: staleGerritData !== null ? staleGerritData.states : null,
+							...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, staleGerritData !== null ? staleGerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
+						});
+						this.loadCommitsGerritFollowUp(msg, gerritShowChangeRefs, staleGerritData !== null ? staleGerritData.refs : null); // runs asynchronously (never awaited)
+					}
 				}
 				break;
 			}
@@ -585,8 +593,7 @@ export class GitGraphView extends Disposable {
 					command: 'loadRepoInfo',
 					refreshId: msg.refreshId,
 					...repoInfo,
-					isRepo: isRepo,
-					bisect: isRepo ? await this.dataSource.getBisectInfo(msg.repo) : null
+					isRepo: isRepo
 				});
 				if (msg.repo !== this.currentRepo) {
 					this.currentRepo = msg.repo;
@@ -917,7 +924,6 @@ export class GitGraphView extends Disposable {
 					<div id="pinnedControls" style="display:none">
 						<span class="unselectable pinnedRowLabel">Pinned:</span>
 					</div>
-					<div id="bisectBanner" class="bisectBanner" style="display:none"></div>
 				</div>
 				<div id="content">
 					<div id="commitGraph"></div>
@@ -972,7 +978,14 @@ export class GitGraphView extends Disposable {
 		if (!config.enabled || config.fetchMode === 'off') return null;
 
 		let cache = this.gerritCache.get(repo) || null;
-		if (forceRefresh || cache === null) {
+		if (cache === null) {
+			// No cached data (e.g. the extension just started): rebuild the cache from the locally
+			// cached change refs, WITHOUT any network access, so the Gerrit data is displayed
+			// instantly and works offline
+			cache = await this.buildLocalGerritEntry(repo);
+			if (cache !== null) this.gerritCache.set(repo, cache);
+		}
+		if (forceRefresh || this.gerritStaleRepos.has(repo) || cache === null) {
 			// Reuse a fetch that is already in progress for this repository
 			let fetch = this.gerritFetches.get(repo);
 			if (fetch === undefined) {
@@ -983,10 +996,51 @@ export class GitGraphView extends Disposable {
 				this.gerritFetches.set(repo, fetch);
 			}
 			const fetched = await fetch;
-			if (fetched !== null) cache = fetched; // on failure, fall back to the last known good cache (if any)
+			this.gerritStaleRepos.delete(repo);
+			if (fetched !== null) cache = fetched; // on failure, fall back to the local cache (if any)
 		}
 		if (cache === null) return null;
 		return this.buildGerritViewData(cache, statusFilter);
+	}
+
+	/**
+	 * Build a Gerrit cache entry from the locally cached change refs
+	 * (`refs/remotes/<remote>/changes/*`) of a repository, WITHOUT any network access. This makes
+	 * Gerrit data fetched previously available instantly (and offline), until the next refresh
+	 * re-fetches it from the remote.
+	 * @param repo The path of the repository.
+	 * @returns The cache entry, or NULL if the repository has no local change refs.
+	 */
+	private async buildLocalGerritEntry(repo: string): Promise<GerritCacheEntry | null> {
+		const config = getConfig().gerrit;
+		const remote = config.remote, gerrit = this.dataSource.gerrit;
+		try {
+			const changes = new Map<number, number[]>();
+			for (const ref of await gerrit.listLocalChangeRefs(repo, remote)) {
+				const parsed = parseChangeRef(ref);
+				if (parsed === null || parsed.meta || parsed.patchset === undefined) continue;
+				const patchsets = changes.get(parsed.change);
+				if (patchsets === undefined) changes.set(parsed.change, [parsed.patchset]);
+				else if (!patchsets.includes(parsed.patchset)) patchsets.push(parsed.patchset);
+			}
+			if (changes.size === 0) return null;
+			for (const patchsets of changes.values()) patchsets.sort((a, b) => a - b);
+
+			// Both of these only read the local repository (git for-each-ref / git log / git config)
+			const urlBase = await gerrit.getChangeUrlBase(repo, remote);
+			const statesByChange = await gerrit.parseMetas(repo, remote, Array.from(changes.keys()), urlBase);
+			const entry: GerritCacheEntry = { states: [], patchsets: new Map() };
+			for (const [change, patchsets] of changes) {
+				const state = statesByChange.get(change);
+				if (state === undefined || state === null) continue; // meta ref not available locally
+				entry.states.push(state);
+				entry.patchsets.set(change, patchsets);
+			}
+			return entry.states.length > 0 ? entry : null;
+		} catch (errorMessage) {
+			this.logger.log('Building the Gerrit data from the local change refs failed: ' + errorMessage);
+			return null;
+		}
 	}
 
 	/**
@@ -1002,18 +1056,18 @@ export class GitGraphView extends Disposable {
 	}
 
 	/**
-	 * Derive the Gerrit view data of a cache entry: the states passing the status filter, and the
-	 * change refs to inject into the commit log.
+	 * Derive the Gerrit view data of a cache entry: all cached states (the Webview applies the
+	 * status filter locally, so toggling the filter chips re-renders instantly without a reload),
+	 * and the change refs to inject into the commit log (built from the states passing the filter).
 	 * @param cache The cache entry of the repository.
 	 * @param statusFilter The session status filter from the Git Graph View, or NULL to use the configured default.
 	 */
 	private buildGerritViewData(cache: GerritCacheEntry, statusFilter: GerritStatusFilter | null): { states: GerritChangeState[], refs: string[] } {
 		const config = getConfig().gerrit;
 		const filter = statusFilter !== null ? statusFilter : config.statusFilter;
-		const states = filterChangeStates(cache.states, filter); // filtered changes must not appear in the graph
 		const refs: string[] = [];
 		if (config.includeChangeCommits) {
-			for (const state of states) {
+			for (const state of filterChangeStates(cache.states, filter)) {
 				// Merged changes are already part of the target branch's history (their content was
 				// submitted, possibly re-hashed by a cherry-pick/rebase submit strategy). Injecting their
 				// patchset refs would add duplicate floating chains to the graph and push branch commits
@@ -1028,27 +1082,57 @@ export class GitGraphView extends Disposable {
 				}
 			}
 		}
-		return { states: states, refs: refs };
+		return { states: cache.states, refs: refs };
 	}
 
 	/**
 	 * Complete an asynchronous Gerrit load started by a `loadCommits` request that was already
 	 * answered with the branch graph (marked `gerritPending`), and send the final `loadCommits`
-	 * response once the fresh Gerrit data is available. The response is skipped when a newer load
-	 * request supersedes it (the Git Graph View also guards this by the refresh id).
+	 * responses once the fresh Gerrit data is available. The update is delivered in stages, so
+	 * each part of the view refreshes as soon as its data is ready:
+	 *  1. meta: the fresh Gerrit states (review info), on the still unchanged commit graph;
+	 *  2. branches: the commit graph, updated with the change refs of the fresh states;
+	 *  3. refs: the change refs displayed as remote branch ref labels (only if enabled).
+	 * A response is skipped when a newer load request supersedes it (the Git Graph View also
+	 * guards this by the refresh id).
 	 * @param msg The original `loadCommits` request message.
 	 * @param gerritShowChangeRefs Should the Gerrit change refs be displayed as remote branch refs.
+	 * @param previousRefs The change refs the pending response was rendered with (NULL => none).
 	 */
-	private async loadCommitsGerritFollowUp(msg: RequestLoadCommits, gerritShowChangeRefs: boolean) {
+	private async loadCommitsGerritFollowUp(msg: RequestLoadCommits, gerritShowChangeRefs: boolean, previousRefs: string[] | null) {
 		const gerritData = await this.loadGerritData(msg.repo, msg.gerritStatusFilter, msg.gerritForceRefresh === true);
 		if (this.loadCommitsRefreshId !== msg.refreshId) return; // superseded by a newer load request
-		this.sendMessage({
-			command: 'loadCommits',
-			refreshId: msg.refreshId,
-			onlyFollowFirstParent: msg.onlyFollowFirstParent,
-			gerritStates: gerritData !== null ? gerritData.states : null,
-			...await this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, gerritData !== null ? gerritData.refs : null, gerritShowChangeRefs, msg.filterPath === undefined ? null : msg.filterPath)
-		});
+		const getCommits = (refs: string[] | null, showChangeRefs: boolean) => this.dataSource.getCommits(msg.repo, msg.branches, msg.authors, msg.maxCommits, msg.showTags, msg.showRemoteBranches, msg.includeCommitsMentionedByReflogs, msg.onlyFollowFirstParent, msg.commitOrdering, msg.remotes, msg.hideRemotes, msg.stashes, refs, showChangeRefs, msg.filterPath === undefined ? null : msg.filterPath);
+		const sendStage = async (states: GerritChangeState[] | null, refs: string[] | null, showChangeRefs: boolean) => {
+			this.sendMessage({
+				command: 'loadCommits',
+				refreshId: msg.refreshId,
+				onlyFollowFirstParent: msg.onlyFollowFirstParent,
+				gerritStates: states,
+				...await getCommits(refs, showChangeRefs)
+			});
+		};
+
+		if (gerritData === null) {
+			// The Gerrit pipeline failed: degrade to the plain view (as before)
+			await sendStage(null, null, gerritShowChangeRefs);
+			return;
+		}
+
+		// Stage 1 (meta): the fresh review info arrives first, on the unchanged commit graph
+		await sendStage(gerritData.states, previousRefs, gerritShowChangeRefs);
+		if (this.loadCommitsRefreshId !== msg.refreshId) return; // superseded by a newer load request
+
+		// The change refs are unchanged (e.g. a refresh that brought no new changes): the commit
+		// graph of stages 2 and 3 would be identical, so skip their getCommits round-trips entirely
+		if (previousRefs !== null && previousRefs.length === gerritData.refs.length && previousRefs.every((ref, i) => ref === gerritData.refs[i])) return;
+
+		// Stage 2 (branches): the commit graph is updated with the change refs of the fresh states
+		await sendStage(gerritData.states, gerritData.refs, false);
+		if (this.loadCommitsRefreshId !== msg.refreshId) return; // superseded by a newer load request
+
+		// Stage 3 (refs): display the change refs as remote branch ref labels
+		if (gerritShowChangeRefs) await sendStage(gerritData.states, gerritData.refs, true);
 	}
 
 	/**
@@ -1064,6 +1148,13 @@ export class GitGraphView extends Disposable {
 			const changes = config.fetchMode === 'all'
 				? await gerrit.listRemoteChanges(repo, remote)
 				: limitChanges(await gerrit.listRemoteChanges(repo, remote), config.fetchLimit);
+			if (changes.size === 0 && (await gerrit.listLocalChangeRefs(repo, remote)).length > 0) {
+				// ls-remote returned nothing while local change refs exist: the remote is unreachable
+				// (a timeout resolves with an empty map). Fail, so the previously cached (or locally
+				// rebuilt) Gerrit data keeps being displayed instead of an empty view.
+				this.logger.log('Gerrit ls-remote returned no changes while local change refs exist (remote unreachable?), keeping the local Gerrit data.');
+				return null;
+			}
 			const entry: GerritCacheEntry = { states: [], patchsets: new Map() };
 			if (changes.size > 0) {
 				// Resolve the change URL base concurrently with the fetch (it doesn't depend on it)
@@ -1098,11 +1189,12 @@ export class GitGraphView extends Disposable {
 	}
 
 	/**
-	 * Invalidate the cached Gerrit data of a repository, so that the next load re-fetches it from the remote.
+	 * Mark the cached Gerrit data of a repository as stale, so that the next load re-fetches it
+	 * from the remote (falling back to the locally cached change refs if the remote is unreachable).
 	 * @param repo The path of the repository.
 	 */
 	private invalidateGerritCache(repo: string) {
-		this.gerritCache.delete(repo);
+		this.gerritStaleRepos.add(repo);
 	}
 
 	/**
@@ -1139,6 +1231,7 @@ export class GitGraphView extends Disposable {
 		// Invalidate the cached Gerrit data and any in-flight fetches (which used the previous
 		// settings): the onDidChangeConfiguration listener reloads the Git Graph View, causing the
 		// next load to fetch exactly the configured number of changes (pruning any surplus local refs)
+		for (const repo of this.gerritCache.keys()) this.gerritStaleRepos.add(repo);
 		this.gerritCache.clear();
 		this.gerritFetches.clear();
 		this.gerritCacheGeneration++;

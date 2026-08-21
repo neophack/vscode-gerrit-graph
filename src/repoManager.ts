@@ -5,7 +5,7 @@ import { getConfig } from './config';
 import { DataSource } from './dataSource';
 import { DEFAULT_REPO_STATE, ExtensionState } from './extensionState';
 import { Logger } from './logger';
-import { BooleanOverride, ErrorInfo, FileViewType, GitRepoSet, GitRepoState, PullRequestConfig, PullRequestConfigBase, PullRequestProvider, RepoCommitOrdering } from './types';
+import { BooleanOverride, ErrorInfo, FileViewType, GitRepoSet, GitRepoState, PinnedCommit, PullRequestConfig, PullRequestConfigBase, PullRequestProvider, RepoCommitOrdering } from './types';
 import { evalPromises, getPathFromStr, getPathFromUri, getRepoName, pathWithTrailingSlash, realpath, showErrorMessage, showInformationMessage } from './utils';
 import { BufferedQueue } from './utils/bufferedQueue';
 import { Disposable, toDisposable } from './utils/disposable';
@@ -432,8 +432,34 @@ export class RepoManager extends Disposable {
 	 * @param state The state.
 	 */
 	public setRepoState(repo: string, state: GitRepoState) {
+		const pinsChanged = !this.isKnownRepo(repo)
+			|| this.repos[repo].pinnedBranches !== state.pinnedBranches
+			|| this.repos[repo].pinnedCommits !== state.pinnedCommits;
 		this.repos[repo] = state;
 		this.extensionState.saveRepos(this.repos);
+		if (pinsChanged) {
+			this.writeRepoPins(repo);
+		}
+	}
+
+	/**
+	 * Persist the pinned commits and branches of a repository to its External Configuration File (`.vscode/review-graph.json`).
+	 * @param repo The path of the repository.
+	 */
+	private writeRepoPins(repo: string) {
+		const state = this.repos[repo];
+		if (state === undefined) {
+			return;
+		}
+		readExternalConfigFile(repo).then((file) => {
+			if (!this.isKnownRepo(repo) || this.repos[repo] !== state) {
+				return;
+			}
+			const contents: ExternalRepoConfig.File = file !== null ? Object.assign({}, file) : {};
+			contents.pinnedBranches = state.pinnedBranches;
+			contents.pinnedCommits = state.pinnedCommits;
+			writeExternalConfigFile(repo, contents).catch(showErrorMessage);
+		});
 	}
 
 	/**
@@ -649,9 +675,20 @@ export class RepoManager extends Disposable {
 	 * @param isRepoNew Is the repository new (was it just added)
 	 */
 	private async checkRepoForNewConfig(repo: string, isRepoNew: boolean = false) {
+		let changes = false;
 		try {
 			const file = await readExternalConfigFile(repo);
 			const state = this.repos[repo];
+			if (state && file !== null) {
+				const pinnedBranches = Array.isArray(file.pinnedBranches) ? file.pinnedBranches : [];
+				const pinnedCommits = Array.isArray(file.pinnedCommits) ? file.pinnedCommits : [];
+				if (state.pinnedBranches !== pinnedBranches || state.pinnedCommits !== pinnedCommits) {
+					state.pinnedBranches = pinnedBranches;
+					state.pinnedCommits = pinnedCommits;
+					this.extensionState.saveRepos(this.repos);
+					changes = true;
+				}
+			}
 			if (state && file !== null && typeof file.exportedAt === 'number' && file.exportedAt > state.lastImportAt) {
 				const validationError = validateExternalConfigFile(file);
 				if (validationError === null) {
@@ -666,14 +703,14 @@ export class RepoManager extends Disposable {
 						if (!isRepoNew && action === 'Yes') {
 							showInformationMessage('Git Graph Repository Configuration was successfully imported for the repository "' + (state.name || getRepoName(repo)) + '".');
 						}
-						return true;
+						changes = true;
 					}
 				} else {
 					showErrorMessage('The value for "' + validationError + '" in the configuration file "' + getPathFromStr(path.join(repo, '.vscode', 'review-graph.json')) + '" is invalid.');
 				}
 			}
 		} catch (_) { }
-		return false;
+		return changes;
 	}
 
 	/**
@@ -795,6 +832,8 @@ export namespace ExternalRepoConfig {
 		onlyFollowFirstParent?: boolean;
 		onRepoLoadShowCheckedOutBranch?: boolean;
 		onRepoLoadShowSpecificBranches?: string[];
+		pinnedBranches?: string[];
+		pinnedCommits?: PinnedCommit[];
 		pullRequestConfig?: PullRequestConfig;
 		showRemoteBranches?: boolean;
 		showStashes?: boolean;
@@ -894,6 +933,8 @@ function generateExternalConfigFile(state: GitRepoState): Readonly<ExternalRepoC
 	if (state.onRepoLoadShowSpecificBranches !== null) {
 		file.onRepoLoadShowSpecificBranches = state.onRepoLoadShowSpecificBranches;
 	}
+	file.pinnedBranches = state.pinnedBranches;
+	file.pinnedCommits = state.pinnedCommits;
 	if (state.pullRequestConfig !== null) {
 		let provider: ExternalRepoConfig.PullRequestProvider;
 		switch (state.pullRequestConfig.provider) {
@@ -957,6 +998,12 @@ function validateExternalConfigFile(file: Readonly<ExternalRepoConfig.File>) {
 	}
 	if (typeof file.onRepoLoadShowSpecificBranches !== 'undefined' && (!Array.isArray(file.onRepoLoadShowSpecificBranches) || file.onRepoLoadShowSpecificBranches.some((branch) => typeof branch !== 'string'))) {
 		return 'onRepoLoadShowSpecificBranches';
+	}
+	if (typeof file.pinnedBranches !== 'undefined' && (!Array.isArray(file.pinnedBranches) || file.pinnedBranches.some((branch) => typeof branch !== 'string'))) {
+		return 'pinnedBranches';
+	}
+	if (typeof file.pinnedCommits !== 'undefined' && (!Array.isArray(file.pinnedCommits) || file.pinnedCommits.some((commit) => typeof commit !== 'object' || commit === null || typeof commit.hash !== 'string' || typeof commit.summary !== 'string'))) {
+		return 'pinnedCommits';
 	}
 	if (typeof file.pullRequestConfig !== 'undefined' && (
 		typeof file.pullRequestConfig !== 'object' ||

@@ -102,7 +102,7 @@ describe('Webview Gerrit chip simulation', () => {
 		loadWebview();
 	});
 
-	test('clicking a chip sends loadCommits with the updated filter and re-renders on response', async () => {
+	test('clicking a chip re-renders the badges locally, and only graph-affecting chips reload', async () => {
 		// 1. Extension responds to the initial loadRepoInfo
 		const repoInfoMsg = sentMessages.find((m) => m.command === 'loadRepoInfo');
 		expect(repoInfoMsg).toBeDefined();
@@ -111,51 +111,50 @@ describe('Webview Gerrit chip simulation', () => {
 			branches: ['develop'], head: 'develop', remotes: ['origin'], stashes: [], isRepo: true
 		} }));
 
-		// 2. Extension responds to the initial loadCommits (default filter: only open changes -> no gerrit states)
+		// 2. Extension responds to the initial loadCommits: ALL cached Gerrit states are served (the
+		// webview applies the status filter locally); the default filter hides the merged change
 		const loadMsg1 = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(loadMsg1).toBeDefined();
 		expect(loadMsg1.gerritStatusFilter).toEqual({ new: true, merged: false, abandoned: false, wip: false });
 		window.dispatchEvent(new MessageEvent('message', { data: {
 			command: 'loadCommits', refreshId: loadMsg1.refreshId, error: null, head: 'develop', tags: [],
 			moreAvailable: false, onlyFollowFirstParent: false,
-			gerritStates: [],
-			commits: [COMMIT_PLAIN]
-		} }));
-		expect(document.querySelectorAll('tr.commit').length).toBe(1);
-		expect(document.querySelector('.gitRef.gerrit')).toBeNull();
-
-		// 3. Click the "Merged" chip
-		const mergedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
-		expect(mergedChip.classList.contains('active')).toBe(false);
-		mergedChip.click();
-		expect(mergedChip.classList.contains('active')).toBe(true);
-
-		// 4. A new loadCommits request must be sent (after the 120ms debounce), carrying merged: true
-		await new Promise((resolve) => setTimeout(resolve, 150));
-		const loadMsg2 = sentMessages.filter((m) => m.command === 'loadCommits').pop();
-		expect(loadMsg2.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
-
-		// 5. Extension responds with the merged change state + its commit (carrying the Gerrit change ref, since Show Refs is on)
-		window.dispatchEvent(new MessageEvent('message', { data: {
-			command: 'loadCommits', refreshId: loadMsg2.refreshId, error: null, head: 'develop', tags: [],
-			moreAvailable: false, onlyFollowFirstParent: false,
 			gerritStates: [{
 				change: 41456, patchset: 1, codeReview: 2, verified: 1, status: 'merged', wip: false,
-				headHash: COMMIT_MERGED.hash, events: [{ type: 'merged', patchset: 1, timestamp: 1755000000, raw: 'Change has been successfully merged' }], url: null
+				headHash: COMMIT_MERGED.hash,
+				events: [{ type: 'merged', patchset: 1, timestamp: 1755000000, raw: 'Change has been successfully merged' }],
+				url: null
 			}],
 			commits: [{ ...COMMIT_MERGED, remotes: [{ name: 'origin/changes/56/41456/1', remote: 'origin' }] }, COMMIT_PLAIN]
 		} }));
-
-		// 6. The table must re-render: the change commit appears with a Gerrit badge and meta chip
 		expect(document.querySelectorAll('tr.commit').length).toBe(2);
+		expect(document.querySelector('.gitRef.gerrit')).toBeNull(); // merged is filtered out locally
+
+		// 3. Click the "Merged" chip: the badge must appear IMMEDIATELY (local re-render, no request)
+		const mergedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
+		expect(mergedChip.classList.contains('active')).toBe(false);
+		const messagesBefore = sentMessages.filter((m) => m.command === 'loadCommits').length;
+		mergedChip.click();
+		expect(mergedChip.classList.contains('active')).toBe(true);
 		const badge = document.querySelector('.gitRef.gerrit');
 		expect(badge).not.toBeNull();
 		expect(badge.textContent).toContain('#41456/1');
 		expect(badge.textContent).toContain('CR+2');
 		const changeRefChip = document.querySelector('.gitRef.remote[data-name="origin/changes/56/41456/1"]');
 		expect(changeRefChip).not.toBeNull();
+		await new Promise((resolve) => setTimeout(resolve, 150)); // the debounce must not fire for "merged"
+		expect(sentMessages.filter((m) => m.command === 'loadCommits').length).toBe(messagesBefore);
 
-		// 7. Clicking the meta chip expands in-table meta rows (no request)
+		// 4. Clicking the "Abandoned" chip changes the injected change refs: a loadCommits request
+		// must be sent after the debounce, carrying the updated filter
+		const abandonedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'abandoned');
+		abandonedChip.click();
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		const loadMsg2 = sentMessages.filter((m) => m.command === 'loadCommits').pop();
+		expect(loadMsg2.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: true, wip: false });
+		expect(loadMsg2.gerritForceRefresh).toBe(false); // served from the Gerrit cache
+
+		// 5. Clicking the meta chip expands in-table meta rows (no request)
 		expect(document.querySelector('.gg-meta-chip')).not.toBeNull();
 		(document.querySelector('.gg-meta-chip') as any).click();
 		expect(document.querySelectorAll('tr.gg-meta-row').length).toBe(1);
@@ -165,7 +164,8 @@ describe('Webview Gerrit chip simulation', () => {
 	});
 
 	test('the review dialog shows the expandable full NoteDb record of each event', () => {
-		// 1. Load commits with a merged change whose events carry the full NoteDb records (rawFull)
+		// 1. Load commits with a merged change whose events carry the full NoteDb records (rawFull);
+		// enable the "Merged" chip first so the badge passes the locally applied status filter
 		respondToRepoInfo();
 		const loadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		window.dispatchEvent(new MessageEvent('message', { data: {
@@ -182,6 +182,7 @@ describe('Webview Gerrit chip simulation', () => {
 			}],
 			commits: [COMMIT_MERGED, COMMIT_PLAIN]
 		} }));
+		(Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged') as any).click();
 
 		// 2. Clicking the Gerrit badge opens the review dialog with one row per event (newest first)
 		(document.querySelector('.gitRef.gerrit') as any).click();
@@ -208,22 +209,10 @@ describe('Webview Gerrit chip simulation', () => {
 	});
 
 	test('the chip selection is restored when the webview is reloaded (e.g. switching away from the panel and back)', async () => {
-		// 1. Initial load (default filter: only open changes)
+		// 1. Initial load (all cached states are served; the merged change is hidden by the filter)
 		respondToRepoInfo();
 		window.dispatchEvent(new MessageEvent('message', { data: {
 			command: 'loadCommits', refreshId: sentMessages.filter((m) => m.command === 'loadCommits').pop().refreshId, error: null, head: 'develop', tags: [],
-			moreAvailable: false, onlyFollowFirstParent: false, gerritStates: [], commits: [COMMIT_PLAIN]
-		} }));
-
-		// 2. Click the "Merged" chip and let the extension respond (served from the Gerrit cache)
-		const mergedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
-		mergedChip.click();
-		await new Promise((resolve) => setTimeout(resolve, 150)); // wait for the chip toggle debounce
-		const loadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
-		expect(loadMsg.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
-		expect(loadMsg.gerritForceRefresh).toBe(false); // chip toggles must use the Gerrit cache
-		window.dispatchEvent(new MessageEvent('message', { data: {
-			command: 'loadCommits', refreshId: loadMsg.refreshId, error: null, head: 'develop', tags: [],
 			moreAvailable: false, onlyFollowFirstParent: false,
 			gerritStates: [{
 				change: 41456, patchset: 1, codeReview: 2, verified: 1, status: 'merged', wip: false,
@@ -231,6 +220,13 @@ describe('Webview Gerrit chip simulation', () => {
 			}],
 			commits: [COMMIT_MERGED, COMMIT_PLAIN]
 		} }));
+		expect(document.querySelector('.gitRef.gerrit')).toBeNull();
+
+		// 2. Click the "Merged" chip: the badge appears instantly (local re-render, no reload)
+		const mergedChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
+		mergedChip.click();
+		expect(document.querySelector('.gitRef.gerrit')).not.toBeNull();
+		await new Promise((resolve) => setTimeout(resolve, 150)); // no debounced request must fire
 
 		// 3. The selection must have been persisted to the webview state
 		expect(webviewState.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });

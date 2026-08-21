@@ -2182,7 +2182,7 @@ describe('RepoManager', () => {
 			const repoState = repoManager.getRepos()['/path/to/workspace-folder1/repo1'];
 			expect(repoState.name).toBe(null);
 			expect(repoState.lastImportAt).toBe(1587559258000);
-			expect(spyOnSaveRepos).toHaveBeenCalledTimes(1);
+			expect(spyOnSaveRepos).toHaveBeenCalledTimes(2);
 		});
 
 		it('Shouldn\'t import the repository configuration when user cancels the modal', async () => {
@@ -2204,7 +2204,7 @@ describe('RepoManager', () => {
 
 			// Assert
 			await waitForExpect(() => expect(spyOnIsKnownRepo).toHaveBeenCalledWith('/path/to/workspace-folder1/repo1'));
-			expect(spyOnSaveRepos).not.toHaveBeenCalled();
+			expect(spyOnSaveRepos).toHaveBeenCalledTimes(1);
 		});
 
 		it('Shouldn\'t import the repository configuration when it is not for a known repository', async () => {
@@ -2242,6 +2242,8 @@ describe('RepoManager', () => {
 			expect(utils.getPathFromStr(spyOnMkdir.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode');
 			expect(utils.getPathFromStr(spyOnWriteFile.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode/review-graph.json');
 			expect(JSON.parse(spyOnWriteFile.mock.calls[0][1])).toStrictEqual({
+				pinnedBranches: [],
+				pinnedCommits: [],
 				'exportedAt': 1587559258000
 			});
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Successfully exported the Git Graph Repository Configuration to "/path/to/workspace-folder1/repo1/.vscode/review-graph.json".');
@@ -2294,6 +2296,8 @@ describe('RepoManager', () => {
 			expect(utils.getPathFromStr(spyOnMkdir.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode');
 			expect(utils.getPathFromStr(spyOnWriteFile.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode/review-graph.json');
 			expect(JSON.parse(spyOnWriteFile.mock.calls[0][1])).toStrictEqual({
+				pinnedBranches: [],
+				pinnedCommits: [],
 				'exportedAt': 1587559258000
 			});
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Successfully exported the Git Graph Repository Configuration to "/path/to/workspace-folder1/repo1/.vscode/review-graph.json".');
@@ -2321,6 +2325,8 @@ describe('RepoManager', () => {
 			expect(utils.getPathFromStr(spyOnMkdir.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode');
 			expect(utils.getPathFromStr(spyOnWriteFile.mock.calls[0][0])).toBe('/path/to/workspace-folder1/repo1/.vscode/review-graph.json');
 			expect(JSON.parse(spyOnWriteFile.mock.calls[0][1])).toStrictEqual({
+				pinnedBranches: [],
+				pinnedCommits: [],
 				'exportedAt': 1587559258000
 			});
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Successfully exported the Git Graph Repository Configuration to "/path/to/workspace-folder1/repo1/.vscode/review-graph.json".');
@@ -2410,6 +2416,8 @@ describe('RepoManager', () => {
 			// Assert
 			const expected: any = {};
 			expected[fileKey] = fileValue;
+			expected['pinnedBranches'] = [];
+			expected['pinnedCommits'] = [];
 			expected['exportedAt'] = 1587559258000;
 			expect(JSON.parse(spyOnWriteFile.mock.calls[0][1])).toStrictEqual(expected);
 

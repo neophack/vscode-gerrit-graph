@@ -7,7 +7,7 @@ import { AskpassEnvironment, AskpassManager } from './askpass/askpassManager';
 import { getConfig } from './config';
 import { GerritDataSource } from './gerrit';
 import { Logger } from './logger';
-import { ActionedUser, BisectInfo, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
+import { ActionedUser, CommitOrdering, DateType, DeepWriteable, ErrorInfo, ErrorInfoExtensionPrefix, GitCommit, GitCommitDetails, GitCommitStash, GitConfigLocation, GitFileChange, GitFileStatus, GitPushBranchMode, GitRepoConfig, GitRepoConfigBranches, GitResetMode, GitSignature, GitSignatureStatus, GitStash, GitTagDetails, MergeActionOn, RebaseActionOn, SquashMessageFormat, TagType, Writeable } from './types';
 import { GitExecutable, GitVersionRequirement, UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, constructIncompatibleGitVersionMessage, doesVersionMeetRequirement, getPathFromStr, getPathFromUri, isSafeRefName, isSafeStashSelector, isValidCommitHash, openGitTerminal, pathWithTrailingSlash, quoteShellArg, realpath, resolveSpawnOutput, showErrorMessage } from './utils';
 import { Disposable } from './utils/disposable';
 import { GgEvent } from './utils/event';
@@ -47,6 +47,8 @@ export class DataSource extends Disposable {
 	private gitFormatCommitDetails!: string;
 	private gitFormatLog!: string;
 	private gitFormatStash!: string;
+	/** Cache of Git config data per repository, to avoid repeated Git spawns on every view load. */
+	private readonly configCache = new Map<string, { remotesSignature: string, promise: Promise<GitRepoConfigData> }>();
 
 	/**
 	 * Check that values received from an untrusted source (the webview) are safe to be passed to
@@ -352,11 +354,44 @@ export class DataSource extends Disposable {
 
 	/**
 	 * Get various Git config variables for a repository that are consumed by the Git Graph View.
+	 * The result is cached per repository (and invalidated when the set of remotes changes, the
+	 * repository's `.git/config` is modified, or `invalidateConfigCache` is called), because it
+	 * requires several Git spawns that would otherwise be repeated on every view load.
 	 * @param repo The path of the repository.
 	 * @param remotes An array of known remotes.
 	 * @returns The config data.
 	 */
 	public getConfig(repo: string, remotes: ReadonlyArray<string>): Promise<GitRepoConfigData> {
+		const remotesSignature = remotes.join('\n');
+		const cached = this.configCache.get(repo);
+		if (cached !== undefined && cached.remotesSignature === remotesSignature) {
+			return cached.promise;
+		}
+		const promise = this.loadConfig(repo, remotes).then((data) => {
+			if (data.error !== null) {
+				// Don't cache error results (they may be transient): allow the next call to retry
+				if (this.configCache.get(repo)?.promise === promise) this.configCache.delete(repo);
+			}
+			return data;
+		});
+		this.configCache.set(repo, { remotesSignature: remotesSignature, promise: promise });
+		return promise;
+	}
+
+	/**
+	 * Invalidate the cached Git config data for a repository (e.g. because its `.git/config` file
+	 * was modified), so that the next `getConfig` call reloads it from Git.
+	 * @param repo The path of the repository (or NULL to clear the cache of all repositories).
+	 */
+	public invalidateConfigCache(repo: string | null) {
+		if (repo === null) {
+			this.configCache.clear();
+		} else {
+			this.configCache.delete(repo);
+		}
+	}
+
+	private loadConfig(repo: string, remotes: ReadonlyArray<string>): Promise<GitRepoConfigData> {
 		return Promise.all([
 			this.getConfigList(repo),
 			this.getConfigList(repo, GitConfigLocation.Local),
@@ -1263,89 +1298,6 @@ export class DataSource extends Disposable {
 
 
 	/* Git Action Methods - Commits */
-
-	/**
-	 * Start a Git bisect session in a repository, marking the bad commit (and optionally the good commit).
-	 * @param repo The path of the repository.
-	 * @param badHash The hash of the commit known to contain the bug.
-	 * @param goodHash The hash of a commit known to be free of the bug (or `null` to only mark the bad commit).
-	 * @returns The ErrorInfo from the executed commands, and the first bad commit if the bisect converged immediately.
-	 */
-	public async bisectStart(repo: string, badHash: string, goodHash: string | null): Promise<{ error: ErrorInfo; firstBadCommit: string | null }> {
-		const unsafeArgs = DataSource.checkUnsafeGitArgs(['badHash', badHash, 'hash']);
-		if (unsafeArgs !== null) return { error: unsafeArgs, firstBadCommit: null };
-		if (goodHash !== null) {
-			const unsafeGoodArgs = DataSource.checkUnsafeGitArgs(['goodHash', goodHash, 'hash']);
-			if (unsafeGoodArgs !== null) return { error: unsafeGoodArgs, firstBadCommit: null };
-		}
-
-		const startError = await this.runGitCommand(['bisect', 'start'], repo);
-		if (startError !== null) return { error: startError, firstBadCommit: null };
-
-		const badResult = await this.bisectMark(repo, 'bad', badHash);
-		if (badResult.error !== null) return { error: badResult.error, firstBadCommit: badResult.firstBadCommit };
-		if (goodHash === null) return badResult;
-
-		return this.bisectMark(repo, 'good', goodHash);
-	}
-
-	/**
-	 * Mark a commit as good, bad or skipped during a Git bisect session.
-	 * @param repo The path of the repository.
-	 * @param mark The bisect state to mark the commit with.
-	 * @param commitHash The hash of the commit to mark (or `null` to mark the current bisect commit).
-	 * @returns The ErrorInfo from the executed command, and the first bad commit if the bisect converged.
-	 */
-	public bisectMark(repo: string, mark: 'good' | 'bad' | 'skip', commitHash: string | null): Promise<{ error: ErrorInfo; firstBadCommit: string | null }> {
-		if (commitHash !== null) {
-			const unsafeArgs = DataSource.checkUnsafeGitArgs(['commitHash', commitHash, 'hash']);
-			if (unsafeArgs !== null) return Promise.resolve({ error: unsafeArgs, firstBadCommit: null });
-		}
-
-		const args = ['bisect', mark];
-		if (commitHash !== null) args.push(commitHash);
-
-		return this.spawnGit(args, repo, (stdout) => ({
-			error: null,
-			firstBadCommit: DataSource.parseFirstBadCommit(stdout.toString())
-		})).catch((errorMessage: string) => ({ error: errorMessage as ErrorInfo, firstBadCommit: null }));
-	}
-
-	/**
-	 * End a Git bisect session in a repository (i.e. `git bisect reset`).
-	 * @param repo The path of the repository.
-	 * @returns The ErrorInfo from the executed command.
-	 */
-	public bisectReset(repo: string) {
-		return this.runGitCommand(['bisect', 'reset'], repo);
-	}
-
-	/**
-	 * Get the current Git bisect state of a repository.
-	 * @param repo The path of the repository.
-	 * @returns The bisect state parsed from `git bisect log`.
-	 */
-	public getBisectInfo(repo: string): Promise<BisectInfo> {
-		return this.gitOutput(['bisect', 'log'], repo, (stdout) => {
-			const info: Writeable<BisectInfo> = { inProgress: true, goodHashes: [], badHashes: [], firstBadCommit: null };
-			for (const line of stdout.split('\n')) {
-				const match = /^git bisect (good|bad) ([0-9a-f]{7,40})/.exec(line.trim());
-				if (match === null) continue;
-				(match[1] === 'good' ? info.goodHashes : info.badHashes).push(match[2]);
-			}
-			return info;
-		}).catch(() => ({ inProgress: false, goodHashes: [], badHashes: [], firstBadCommit: null }));
-	}
-
-	/**
-	 * Parse the "X is the first bad commit" line from a `git bisect` output.
-	 * @param output The output of a `git bisect good/bad/skip` command.
-	 * @returns The full hash of the first bad commit, or `null` if the bisect has not yet converged.
-	 */
-	private static parseFirstBadCommit(output: string): string | null {
-		const match = /([0-9a-f]{40}) is the first bad commit/.exec(output);
-		return match === null ? null : match[1];
-	}
 
 	/**
 	 * Checkout a commit in a repository.
