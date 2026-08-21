@@ -864,6 +864,26 @@ describe('GitGraphView', () => {
 		});
 
 		describe('commitDetails', () => {
+			it('Should get the message bodies of a batch of commits (fetched on demand for the commit list)', async () => {
+				// Setup
+				const bodies = { '1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b': 'Subject\n\nFull body' };
+				const spyOnGetCommitBodies = jest.spyOn(dataSource, 'getCommitBodies');
+				spyOnGetCommitBodies.mockResolvedValueOnce(bodies);
+
+				// Run
+				onDidReceiveMessage({
+					command: 'commitBodies',
+					repo: '/path/to/repo',
+					commitHashes: ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']
+				});
+
+				// Assert
+				await waitForExpect(() => {
+					expect(spyOnGetCommitBodies).toHaveBeenCalledWith('/path/to/repo', ['1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b']);
+					expect(messages).toStrictEqual([{ command: 'commitBodies', bodies: bodies }]);
+				});
+			});
+
 			it('Should get the data for the Commit Details View', async () => {
 				// Setup
 				const getCommitDetailsResolvedValue = { commitDetails: null, error: null };
@@ -2320,9 +2340,10 @@ describe('GitGraphView', () => {
 			let spyOnListRemoteChanges: jest.SpyInstance, spyOnListLocalChangeRefs: jest.SpyInstance, spyOnGetCommits: jest.SpyInstance, previousGerrit: any;
 			beforeEach(() => {
 				// Setup (the auto-mocked DataSource doesn't construct GerritDataSource, so inject a mock;
-				// clear the Gerrit cache so every test starts from a cold cache)
+				// clear the Gerrit cache and the commit cache so every test starts from a cold cache)
 				GitGraphView.currentPanel!['gerritCache'].clear();
 				GitGraphView.currentPanel!['gerritStaleRepos'].clear();
+				GitGraphView.currentPanel!['commitCache'].clear();
 				spyOnListRemoteChanges = jest.fn().mockResolvedValue(new Map([[100, [1]], [200, [1, 2]]]));
 				spyOnListLocalChangeRefs = jest.fn().mockResolvedValue([]);
 				previousGerrit = (<any>dataSource).gerrit;
@@ -2346,7 +2367,7 @@ describe('GitGraphView', () => {
 				spyOnGetCommits.mockRestore();
 			});
 
-			it('Should render the branch graph IMMEDIATELY on a cold cache, then deliver the Gerrit data asynchronously in stages', async () => {
+			it('Should render the branch graph IMMEDIATELY on a cold cache, then deliver the Gerrit data asynchronously', async () => {
 				// Run (cold cache: the request must be answered in phases)
 				onDidReceiveMessage({ ...loadCommitsBase, refreshId: 2, gerritStatusFilter: { new: true, merged: false, abandoned: false, wip: false } });
 
@@ -2354,22 +2375,17 @@ describe('GitGraphView', () => {
 				await waitForExpect(() => {
 					expect(messages[0]).toMatchObject({ command: 'loadCommits', refreshId: 2, gerritPending: true, gerritStates: null });
 				});
-				expect(spyOnGetCommits).toHaveBeenNthCalledWith(1, '/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null);
+				expect(spyOnGetCommits).toHaveBeenNthCalledWith(1, '/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null, false);
 
-				// Assert (phase 2, meta stage: the fresh review info arrives on the UNCHANGED commit graph)
+				// Assert (phase 2: the fresh Gerrit data arrives on the commit graph WITH the change refs
+				// injected - a meta-only stage on the ref-less pending graph is skipped, since its graph
+				// is immediately superseded by the refs stage)
 				await waitForExpect(() => {
 					expect(messages[1]).toMatchObject({ command: 'loadCommits', refreshId: 2, gerritStates: [CHANGE_OPEN, CHANGE_MERGED] });
 					expect((<any>messages[1]).gerritPending).toBeUndefined();
 				});
-				expect(spyOnGetCommits).toHaveBeenNthCalledWith(2, '/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null);
-
-				// Assert (phase 3, branches stage: the change refs are injected into the commit log)
-				await waitForExpect(() => {
-					expect(messages[2]).toMatchObject({ command: 'loadCommits', refreshId: 2, gerritStates: [CHANGE_OPEN, CHANGE_MERGED] });
-					expect((<any>messages[2]).gerritPending).toBeUndefined();
-				});
-				expect(spyOnGetCommits).toHaveBeenNthCalledWith(3, '/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null);
-				expect(messages).toHaveLength(3);
+				expect(spyOnGetCommits).toHaveBeenNthCalledWith(2, '/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null, false);
+				expect(messages).toHaveLength(2);
 			});
 
 			it('Should skip the pending Gerrit follow-up when a newer load request supersedes it', async () => {
@@ -2420,7 +2436,7 @@ describe('GitGraphView', () => {
 				});
 				expect((<any>messages[0]).gerritPending).toBeUndefined();
 				expect(spyOnGetCommits).toHaveBeenCalledTimes(1);
-				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null);
+				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null, true);
 				expect(spyOnListRemoteChanges).not.toHaveBeenCalled(); // no network access
 			});
 
@@ -2440,7 +2456,9 @@ describe('GitGraphView', () => {
 				});
 				const responses = messages.filter((m: any) => m.command === 'loadCommits' && m.refreshId === 2);
 				expect(responses).toHaveLength(2);
-				expect(spyOnGetCommits).toHaveBeenCalledTimes(2);
+				// The follow-up only swaps in the fresh Gerrit states on the ALREADY LOADED commit
+				// graph (the change refs are unchanged), so no second getCommits is run
+				expect(spyOnGetCommits).toHaveBeenCalledTimes(1);
 			});
 
 			it('Should keep the STALE Gerrit data on screen (gerritPending) during a forced refresh, then deliver the fresh data', async () => {
@@ -2473,7 +2491,7 @@ describe('GitGraphView', () => {
 				// Assert (the pipeline ran once; ALL cached states are served - the Webview applies the filter)
 				await waitForExpect(() => {
 					expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: [CHANGE_OPEN, CHANGE_MERGED] });
-					expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null);
+					expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null, false);
 				});
 				expect(spyOnListRemoteChanges).toHaveBeenCalledTimes(1);
 
@@ -2485,7 +2503,7 @@ describe('GitGraphView', () => {
 				// injected into the graph: the commits loaded stay identical to the initial load)
 				await waitForExpect(() => {
 					expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: [CHANGE_OPEN, CHANGE_MERGED] });
-					expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null);
+					expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], ['refs/remotes/origin/changes/00/100/1'], false, null, true);
 				});
 				expect(spyOnListRemoteChanges).toHaveBeenCalledTimes(1);
 
@@ -2535,9 +2553,10 @@ describe('GitGraphView', () => {
 			let spyOnListRemoteChanges: jest.SpyInstance, spyOnFetchChanges: jest.SpyInstance, spyOnGetCommits: jest.SpyInstance, previousGerrit: any;
 			beforeEach(() => {
 				// Setup (the auto-mocked DataSource doesn't construct GerritDataSource, so inject a mock;
-				// clear the Gerrit cache so every test starts from a cold cache)
+				// clear the Gerrit cache and the commit cache so every test starts from a cold cache)
 				GitGraphView.currentPanel!['gerritCache'].clear();
 				GitGraphView.currentPanel!['gerritStaleRepos'].clear();
+				GitGraphView.currentPanel!['commitCache'].clear();
 				spyOnListRemoteChanges = jest.fn().mockResolvedValue(REMOTE_PATCHSETS);
 				spyOnFetchChanges = jest.fn().mockResolvedValue(null);
 				previousGerrit = (<any>dataSource).gerrit;
@@ -2567,6 +2586,9 @@ describe('GitGraphView', () => {
 			 * `gerritPending`, then again with the fresh Gerrit data).
 			 */
 			const loadWithFilter = async (filter: { new: boolean; merged: boolean; abandoned: boolean; wip: boolean } | null, refreshId = 1) => {
+				// The commit cache is deliberately cleared so each load exercises the full pipeline
+				// (the cache's own behaviour is covered by a dedicated test in the Gerrit cache suite)
+				GitGraphView.currentPanel!['commitCache'].clear();
 				onDidReceiveMessage({ ...loadCommitsBase, refreshId: refreshId, gerritStatusFilter: filter });
 				await waitForExpect(() => {
 					const responses = <any[]>messages.filter((m) => m.command === 'loadCommits' && m.refreshId === refreshId);
@@ -2575,10 +2597,17 @@ describe('GitGraphView', () => {
 				});
 			};
 
-			/** Assert the Gerrit states and the change refs injected into the commit log of the LAST load. */
-			const expectLastLoad = (states: any[], refs: string[] | null, showChangeRefs = false) => {
+			/**
+			 * Assert the Gerrit states and the change refs injected into the commit log of the LAST
+			 * load. `deferred` must be true when the last load was served from the Gerrit cache (the
+			 * branch that defers the uncommitted changes status), rather than the cold-cache pending
+			 * path (which re-runs getCommits, unmodified, via loadCommitsGerritFollowUp).
+			 */
+			const expectLastLoad = (states: any[], refs: string[] | null, showChangeRefs = false, deferred = false) => {
 				expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: states });
-				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], refs, showChangeRefs, null);
+				const args: any[] = ['/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], refs, showChangeRefs, null];
+				args.push(deferred);
+				expect(spyOnGetCommits).toHaveBeenLastCalledWith(...args);
 			};
 
 			it('Serves only open (non-wip) changes and injects only their latest patchset refs (default chips)', async () => {
@@ -2589,7 +2618,7 @@ describe('GitGraphView', () => {
 			it('Toggling the "Merged" chip only adds review info: the injected refs (and thus the graph) stay identical', async () => {
 				await loadWithFilter(FILTER_DEFAULT, 1);
 				await loadWithFilter({ new: true, merged: true, abandoned: false, wip: false }, 2);
-				expectLastLoad(ALL_CHANGES, [ref(100, 2)]);
+				expectLastLoad(ALL_CHANGES, [ref(100, 2)], false, true);
 				expect(spyOnListRemoteChanges).toHaveBeenCalledTimes(1); // served from the cache
 			});
 
@@ -2617,10 +2646,10 @@ describe('GitGraphView', () => {
 				vscode.mockExtensionSettingReturnValue('gerrit.showChangeRefs', true);
 				onDidReceiveMessage({ ...loadCommitsBase, refreshId: 1, gerritStatusFilter: FILTER_DEFAULT });
 				await waitForExpect(() => {
-					// A cold-cache load calls getCommits four times (the immediate branch graph, the
-					// meta stage on the unchanged graph, the branches stage without ref labels, then
-					// the refs stage with the change refs displayed); the last must pass the flag through
-					expect(spyOnGetCommits).toHaveBeenCalledTimes(4);
+					// A cold-cache load calls getCommits three times (the immediate branch graph,
+					// the branches stage with the change refs injected, then the refs stage with the
+					// change refs displayed); the last must pass the flag through
+					expect(spyOnGetCommits).toHaveBeenCalledTimes(3);
 				});
 				expectLastLoad(ALL_CHANGES, [ref(100, 2)], true);
 			});
@@ -2641,14 +2670,14 @@ describe('GitGraphView', () => {
 				vscode.mockExtensionSettingReturnValue('gerrit.enabled', false);
 				await loadWithFilter(FILTER_ALL);
 				expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: null });
-				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null);
+				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null, true);
 			});
 
 			it('Gerrit fetchMode "off": no Gerrit states are served and getCommits receives NULL refs', async () => {
 				vscode.mockExtensionSettingReturnValue('gerrit.fetchMode', 'off');
 				await loadWithFilter(FILTER_ALL);
 				expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: null });
-				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null);
+				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null, true);
 			});
 
 			it('A NULL session filter falls back to the configured default status filter (merged changes still inject no refs)', async () => {
@@ -2661,7 +2690,7 @@ describe('GitGraphView', () => {
 				spyOnFetchChanges.mockResolvedValue('error: unable to access remote');
 				await loadWithFilter(FILTER_ALL);
 				expect(messages[messages.length - 1]).toMatchObject({ command: 'loadCommits', gerritStates: null });
-				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null);
+				expect(spyOnGetCommits).toHaveBeenLastCalledWith('/path/to/repo', null, null, 300, false, false, false, false, CommitOrdering.Date, ['origin'], [], [], null, false, null, false);
 			});
 
 			it('A failed forced refresh falls back to the last good cached Gerrit data', async () => {
@@ -2737,6 +2766,64 @@ describe('GitGraphView', () => {
 				error: null
 			};
 
+			it('Should serve identical commit loads from the commit cache, re-running Git only on a forced refresh', async () => {
+				// Setup
+				const spyOnGetCommits = jest.spyOn(dataSource, 'getCommits');
+				spyOnGetCommits.mockResolvedValue(getCommitsResolvedValue);
+
+				// Run (two identical requests: the second is served from the commit cache)
+				for (const refreshId of [2, 3]) {
+					onDidReceiveMessage({
+						command: 'loadCommits',
+						repo: '/path/to/repo',
+						refreshId: refreshId,
+						branches: null,
+						authors: null,
+						maxCommits: 300,
+						showTags: true,
+						showRemoteBranches: false,
+						includeCommitsMentionedByReflogs: false,
+						onlyFollowFirstParent: false,
+						commitOrdering: CommitOrdering.Date,
+						remotes: ['origin'],
+						hideRemotes: [],
+						stashes: [],
+						gerritStatusFilter: null
+					});
+				}
+
+				// Assert (both requests are answered, but Git only ran once)
+				await waitForExpect(() => {
+					expect(messages.filter((m: any) => m.command === 'loadCommits')).toHaveLength(2);
+				});
+				expect(spyOnGetCommits).toHaveBeenCalledTimes(1);
+
+				// Run (a forced refresh bypasses the cache)
+				onDidReceiveMessage({
+					command: 'loadCommits',
+					repo: '/path/to/repo',
+					refreshId: 4,
+					branches: null,
+					authors: null,
+					maxCommits: 300,
+					showTags: true,
+					showRemoteBranches: false,
+					includeCommitsMentionedByReflogs: false,
+					onlyFollowFirstParent: false,
+					commitOrdering: CommitOrdering.Date,
+					remotes: ['origin'],
+					hideRemotes: [],
+					stashes: [],
+					gerritStatusFilter: null,
+					gerritForceRefresh: true
+				});
+				await waitForExpect(() => {
+					expect(messages.filter((m: any) => m.command === 'loadCommits').some((m: any) => m.refreshId === 4)).toBe(true);
+				});
+				expect(spyOnGetCommits).toHaveBeenCalledTimes(2);
+				spyOnGetCommits.mockRestore();
+			});
+
 			it('Should get commits (show tags)', async () => {
 				// Setup
 				const spyOnGetCommits = jest.spyOn(dataSource, 'getCommits');
@@ -2763,7 +2850,7 @@ describe('GitGraphView', () => {
 
 				// Assert
 				await waitForExpect(() => {
-					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, true, false, false, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null);
+					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, true, false, false, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null, true);
 					expect(messages).toStrictEqual([
 						{
 							command: 'loadCommits',
@@ -2807,7 +2894,7 @@ describe('GitGraphView', () => {
 
 				// Assert
 				await waitForExpect(() => {
-					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, true, false, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null);
+					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, true, false, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null, true);
 					expect(messages).toStrictEqual([
 						{
 							command: 'loadCommits',
@@ -2851,7 +2938,7 @@ describe('GitGraphView', () => {
 
 				// Assert
 				await waitForExpect(() => {
-					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, false, true, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null);
+					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, false, true, false, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null, true);
 					expect(messages).toStrictEqual([
 						{
 							command: 'loadCommits',
@@ -2895,7 +2982,7 @@ describe('GitGraphView', () => {
 
 				// Assert
 				await waitForExpect(() => {
-					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, false, false, true, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null);
+					expect(spyOnGetCommits).toHaveBeenCalledWith('/path/to/repo', null, null, 300, false, false, false, true, CommitOrdering.Date, ['origin', 'upstream'], ['upstream'], [], null, false, null, true);
 					expect(messages).toStrictEqual([
 						{
 							command: 'loadCommits',
@@ -4236,7 +4323,7 @@ describe('GitGraphView', () => {
 			// Assert
 			const mockedWebviewPanel = vscode.getMockedWebviewPanel(0);
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src vscode-webview-resource: \'unsafe-inline\'; script-src \'nonce-1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d\'; img-src data: https:;">');
-			expect(mockedWebviewPanel.panel.webview.html).toContain('<link rel="stylesheet" type="text/css" href="vscode-webview-resource://file///path/to/extension/media/out.min.css?v=1.38.0">');
+			expect(mockedWebviewPanel.panel.webview.html).toContain('<link rel="stylesheet" type="text/css" href="vscode-webview-resource://file///path/to/extension/media/out.min.css?v=1.39.0">');
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<title>Git Graph</title>');
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<style>body{--git-graph-color0:#0085d9; --git-graph-color1:#d9008f; --git-graph-color2:#00d90a; --git-graph-color3:#d98500; --git-graph-color4:#a300d9; --git-graph-color5:#ff0000; --git-graph-color6:#00d9cc; --git-graph-color7:#e138e8; --git-graph-color8:#85d900; --git-graph-color9:#dc5b23; --git-graph-color10:#6f24d6; --git-graph-color11:#ffcc00; } [data-color=\"0\"]{--git-graph-color:var(--git-graph-color0);} [data-color=\"1\"]{--git-graph-color:var(--git-graph-color1);} [data-color=\"2\"]{--git-graph-color:var(--git-graph-color2);} [data-color=\"3\"]{--git-graph-color:var(--git-graph-color3);} [data-color=\"4\"]{--git-graph-color:var(--git-graph-color4);} [data-color=\"5\"]{--git-graph-color:var(--git-graph-color5);} [data-color=\"6\"]{--git-graph-color:var(--git-graph-color6);} [data-color=\"7\"]{--git-graph-color:var(--git-graph-color7);} [data-color=\"8\"]{--git-graph-color:var(--git-graph-color8);} [data-color=\"9\"]{--git-graph-color:var(--git-graph-color9);} [data-color=\"10\"]{--git-graph-color:var(--git-graph-color10);} [data-color=\"11\"]{--git-graph-color:var(--git-graph-color11);} </style>');
 		});
@@ -4280,7 +4367,7 @@ describe('GitGraphView', () => {
 			const mockedWebviewPanel = vscode.getMockedWebviewPanel(0);
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<div id="view" tabindex="-1">');
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d">');
-			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d" src="vscode-webview-resource://file///path/to/extension/media/out.min.js?v=1.38.0"></script>');
+			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d" src="vscode-webview-resource://file///path/to/extension/media/out.min.js?v=1.39.0"></script>');
 			expect(spyOnIsAvatarStorageAvailable).not.toHaveBeenCalled();
 		});
 
@@ -4296,7 +4383,7 @@ describe('GitGraphView', () => {
 			const mockedWebviewPanel = vscode.getMockedWebviewPanel(0);
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<div id="view" tabindex="-1">');
 			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d">');
-			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d" src="vscode-webview-resource://file///path/to/extension/media/out.min.js?v=1.38.0"></script>');
+			expect(mockedWebviewPanel.panel.webview.html).toContain('<script nonce="1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d" src="vscode-webview-resource://file///path/to/extension/media/out.min.js?v=1.39.0"></script>');
 			expect(spyOnIsAvatarStorageAvailable).toHaveBeenCalledWith();
 		});
 	});

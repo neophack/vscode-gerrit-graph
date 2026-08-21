@@ -1123,7 +1123,7 @@ class Graph {
 		}
 	}
 
-	public render(expandedCommit: ExpandedCommit | null, metaExpansions: RowExpansion[] = []) {
+	public render(expandedCommit: ExpandedCommit | null, metaExpansions: RowExpansion[] = [], visibleRange: { start: number, end: number } | null = null) {
 		this.expandedCommitIndex = expandedCommit !== null ? expandedCommit.index : -1;
 		this.expansions = (this.expandedCommitIndex > -1 ? [{ index: this.expandedCommitIndex, height: this.config.grid.expandY }] : [])
 			.concat(metaExpansions)
@@ -1143,6 +1143,9 @@ class Graph {
 				expansionOffset += this.expansions[nextExpansion].height;
 				nextExpansion++;
 			}
+			// Windowed rendering: only the vertices of the rendered commit rows are drawn (the
+			// branch paths above always span the whole graph - there are only a few of them)
+			if (visibleRange !== null && (i < visibleRange.start || i >= visibleRange.end)) continue;
 			this.vertices[i].draw(group, this.config, expansionOffset);
 		}
 

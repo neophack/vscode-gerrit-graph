@@ -93,7 +93,24 @@ const VIEW_HTML = '<div id="view" tabindex="-1">' +
 // Mutable window size used by the window.outerWidth/outerHeight getters (so tests can simulate resizes)
 const winSize = { w: 1024, h: 768 };
 
+// jsdom shares one window across the tests of this file: record every listener the bundle
+// registers on the persistent nodes (window / document / body) and remove them at the start of
+// each loadWebview() call, so the bundle instances of earlier tests no longer respond to
+// dispatched messages or events (in production, resetting the webview HTML tears the old page down).
+const recordedListeners: { target: any, type: string, cb: any }[] = [];
+for (const target of [window, document, document.body]) {
+	const origAddEventListener = target.addEventListener.bind(target);
+	target.addEventListener = (type: any, cb: any, ...rest: any[]) => {
+		recordedListeners.push({ target: target, type: type, cb: cb });
+		return origAddEventListener(type, cb, ...rest);
+	};
+}
+function removeStaleListeners() {
+	for (const listener of recordedListeners.splice(0)) listener.target.removeEventListener(listener.type, listener.cb);
+}
+
 function loadWebview() {
+	removeStaleListeners();
 	document.body.innerHTML = VIEW_HTML;
 	Object.defineProperty(window, 'outerWidth', { configurable: true, get: () => winSize.w });
 	Object.defineProperty(window, 'outerHeight', { configurable: true, get: () => winSize.h });

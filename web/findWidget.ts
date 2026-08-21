@@ -145,6 +145,14 @@ class FindWidget {
 	}
 
 	/**
+	 * Is a find query currently active (matching requires every commit row to be rendered, so the
+	 * view falls back to a full render instead of windowed rendering while this is TRUE).
+	 */
+	public isSearching() {
+		return this.text !== '';
+	}
+
+	/**
 	 * Refresh the Find Widget's state / matches after the commits have changed.
 	 */
 	public refresh() {

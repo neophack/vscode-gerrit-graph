@@ -70,7 +70,24 @@ const VIEW_HTML = '<div id="view" tabindex="-1">' +
 	'<div id="content"><div id="commitGraph"></div><div id="commitTable"></div></div>' +
 	'<div id="footer"></div></div>';
 
+// jsdom shares one window across the tests of this file: record every listener the bundle
+// registers on the persistent nodes (window / document / body) and remove them at the start of
+// each loadWebview() call, so the bundle instances of earlier tests no longer respond to
+// dispatched messages or events (in production, resetting the webview HTML tears the old page down).
+const recordedListeners: { target: any, type: string, cb: any }[] = [];
+for (const target of [window, document, document.body]) {
+	const origAddEventListener = target.addEventListener.bind(target);
+	target.addEventListener = (type: any, cb: any, ...rest: any[]) => {
+		recordedListeners.push({ target: target, type: type, cb: cb });
+		return origAddEventListener(type, cb, ...rest);
+	};
+}
+function removeStaleListeners() {
+	for (const listener of recordedListeners.splice(0)) listener.target.removeEventListener(listener.type, listener.cb);
+}
+
 function loadWebview() {
+	removeStaleListeners();
 	document.body.innerHTML = VIEW_HTML;
 	(globalThis as any).acquireVsCodeApi = () => ({
 		postMessage: (msg: any) => { sentMessages.push(msg); return undefined; },
@@ -234,16 +251,30 @@ describe('Webview Gerrit chip simulation', () => {
 		// 4. Simulate the webview being reloaded (the panel was hidden and re-shown)
 		loadWebview();
 
-		// 5. The chip must still be selected, and the Gerrit badges must render immediately from the restored state
+		// 5. The chip must still be selected. The commit list (and with it the Gerrit badges) is
+		// NOT restored directly - the lightweight persisted state triggers a reload instead, so the
+		// badges return with the first loadCommits response of the reloaded view
 		const restoredChip: any = Array.from(document.querySelectorAll('.gerritFilterChip')).find((c: any) => c.dataset.status === 'merged');
 		expect(restoredChip.classList.contains('active')).toBe(true);
-		expect(document.querySelector('.gitRef.gerrit')).not.toBeNull();
+		expect(document.querySelector('.gitRef.gerrit')).toBeNull();
 
 		// 6. The initial load of the reloaded view must carry the restored filter (served from the Gerrit cache)
 		respondToRepoInfo();
 		const reloadMsg = sentMessages.filter((m) => m.command === 'loadCommits').pop();
 		expect(reloadMsg.gerritStatusFilter).toEqual({ new: true, merged: true, abandoned: false, wip: false });
 		expect(reloadMsg.gerritForceRefresh).toBe(false);
+
+		// 7. Once the reloaded view receives its commits, the badges are rendered again
+		window.dispatchEvent(new MessageEvent('message', { data: {
+			command: 'loadCommits', refreshId: reloadMsg.refreshId, error: null, head: 'develop', tags: [],
+			moreAvailable: false, onlyFollowFirstParent: false,
+			gerritStates: [{
+				change: 41456, patchset: 1, codeReview: 2, verified: 1, status: 'merged', wip: false,
+				headHash: COMMIT_MERGED.hash, events: [], url: null
+			}],
+			commits: [COMMIT_MERGED, COMMIT_PLAIN]
+		} }));
+		expect(document.querySelector('.gitRef.gerrit')).not.toBeNull();
 	});
 
 	test('meta rows expanded by the toggle appear newest → oldest, matching the review dialog', () => {

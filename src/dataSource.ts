@@ -15,8 +15,19 @@ import { GgEvent } from './utils/event';
 const DRIVE_LETTER_PATH_REGEX = /^[a-z]:\//;
 const EOL_REGEX = /\r\n|\r|\n/g;
 const INVALID_BRANCH_REGEXP = /^\(.* .*\)$/;
-const REMOTE_HEAD_BRANCH_REGEXP = /^remotes\/.*\/HEAD$/;
 const GIT_LOG_SEPARATOR = 'XX7Nal-YARtTpjCikii9nJxER19D6diSyk-AWkPb';
+
+/**
+ * How long a repository's refs stay cached after they were read. Just long enough that the
+ * `loadRepoInfo` and `loadCommits` requests of a single view load share one read of the refs
+ * (they are sent milliseconds apart), and short enough that it can't serve a stale graph. Every
+ * Git action run by the extension, and every change to the repository's `.git` directory,
+ * invalidates it explicitly (`invalidateRefCache`).
+ */
+const REF_SNAPSHOT_CACHE_MS = 3000;
+
+/** The maximum number of refs peeled by a single `rev-parse` process. */
+const PEEL_REFS_BATCH_SIZE = 200;
 
 export const enum GitConfigKey {
 	DiffGuiTool = 'diff.guitool',
@@ -49,6 +60,8 @@ export class DataSource extends Disposable {
 	private gitFormatStash!: string;
 	/** Cache of Git config data per repository, to avoid repeated Git spawns on every view load. */
 	private readonly configCache = new Map<string, { remotesSignature: string, promise: Promise<GitRepoConfigData> }>();
+	/** Cache of the refs of each repository, to avoid repeated ref scans on every view load. */
+	private readonly refSnapshotCache = new Map<string, { key: string, expiresAt: number, promise: Promise<GitRefSnapshot> }>();
 
 	/**
 	 * Check that values received from an untrusted source (the webview) are safe to be passed to
@@ -146,10 +159,13 @@ export class DataSource extends Disposable {
 			'%B' // Body
 		].join(GIT_LOG_SEPARATOR);
 
+		// Only the subject is fetched for the commit list: full bodies dominate the git log output
+		// size on large repositories (and with it the parse and IPC cost). Bodies are fetched on
+		// demand via getCommitBodies (e.g. when "Show Commit Body Inline" is enabled).
 		this.gitFormatLog = [
 			'%H', '%P', // Hash & Parent Information
 			useMailmap ? '%aN' : '%an', useMailmap ? '%aE' : '%ae', dateType, // Author / Commit Information
-			'%B' // Body
+			'%s' // Subject
 		].join(GIT_LOG_SEPARATOR);
 
 		this.gitFormatStash = [
@@ -203,13 +219,21 @@ export class DataSource extends Disposable {
 	}
 
 	public getRepoInfo(repo: string, showRemoteBranches: boolean, showStashes: boolean, hideRemotes: ReadonlyArray<string>): Promise<GitRepoInfo> {
+		const config = getConfig();
 		return Promise.all([
-			this.getBranches(repo, showRemoteBranches, hideRemotes),
+			// The branches and tags come from the SAME ref read that the `loadCommits` request
+			// immediately after this one needs, rather than from a `git branch -a` and a
+			// `git tag --list` that would each scan the repository's refs all over again.
+			this.readRefs(repo, {
+				showRemoteBranches: showRemoteBranches,
+				showRemoteHeads: config.showRemoteHeads,
+				hideRemotes: hideRemotes,
+				showChangeRefs: config.gerrit.showChangeRefs
+			}).catch(() => <GitRefSnapshot>{ refData: { head: null, heads: [], tags: [], remotes: [] }, branches: [], branchHead: null, tagNames: [] }),
 			this.getRemotes(repo),
-			showStashes ? this.getStashes(repo) : Promise.resolve([]),
-			this.getTags(repo)
+			showStashes ? this.getStashes(repo) : Promise.resolve([])
 		]).then((results) => {
-			return { branches: results[0].branches, head: results[0].head, remotes: results[1], stashes: results[2], tags: results[3], error: null };
+			return { branches: results[0].branches, head: results[0].branchHead, remotes: results[1], stashes: results[2], tags: results[0].tagNames, error: null };
 		}).catch((errorMessage) => {
 			return { branches: [], head: null, remotes: [], stashes: [], tags: [], error: errorMessage };
 		});
@@ -230,9 +254,12 @@ export class DataSource extends Disposable {
 	 * @param gerritRefs The list of Gerrit change refs allowed into the graph (NULL => Gerrit integration disabled).
 	 * @param gerritShowChangeRefs Should the Gerrit change refs (refs/remotes/<remote>/changes/*) be displayed as remote branch refs.
 	 * @param filterPath Only show commits that modified the file(s) at this path (relative to the repository root), or NULL (no path filter).
+	 * @param deferUncommittedChanges Skip computing the "Uncommitted Changes" row (which requires a
+	 * `git status` that can be slow on large working trees). Use this to render the graph
+	 * immediately, and fetch the uncommitted changes status separately afterwards.
 	 * @returns The commits in the repository.
 	 */
-	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null, gerritShowChangeRefs: boolean = false, filterPath: string | null = null): Promise<GitCommitData> {
+	public getCommits(repo: string, branches: ReadonlyArray<string> | null, authors: ReadonlyArray<string> | null, maxCommits: number, showTags: boolean, showRemoteBranches: boolean, includeCommitsMentionedByReflogs: boolean, onlyFollowFirstParent: boolean, commitOrdering: CommitOrdering, remotes: ReadonlyArray<string>, hideRemotes: ReadonlyArray<string>, stashes: ReadonlyArray<GitStash>, gerritRefs: ReadonlyArray<string> | null = null, gerritShowChangeRefs: boolean = false, filterPath: string | null = null, deferUncommittedChanges: boolean = false): Promise<GitCommitData> {
 		const config = getConfig();
 		// Branch names are received from the webview and passed to git log as bare arguments, so
 		// drop any that could be misinterpreted as git options (argument injection). Custom Branch
@@ -244,7 +271,7 @@ export class DataSource extends Disposable {
 		// is awaited, so that the three Git processes run in parallel
 		const logPromise = this.getLog(repo, refs, authors, maxCommits + 1, showTags && config.showCommitsOnlyReferencedByTags, showRemoteBranches, includeCommitsMentionedByReflogs, onlyFollowFirstParent, commitOrdering, remotes, hideRemotes, stashes, gerritRefs, filterPath);
 		const refsPromise = this.getRefs(repo, showRemoteBranches, config.showRemoteHeads, hideRemotes, gerritShowChangeRefs).then((refData: GitRefData) => refData, (errorMessage: string) => errorMessage);
-		const uncommittedChangesPromise = config.showUncommittedChanges ? this.getUncommittedChanges(repo) : null;
+		const uncommittedChangesPromise = config.showUncommittedChanges && !deferUncommittedChanges ? this.getUncommittedChanges(repo) : null;
 		if (uncommittedChangesPromise !== null) uncommittedChangesPromise.catch(() => { /* the failure is re-thrown when the value is used below */ });
 		return Promise.all([logPromise, refsPromise]).then(async (results) => {
 			let commits: GitCommitRecord[] = results[0], refData: GitRefData | string = results[1], i;
@@ -1697,37 +1724,25 @@ export class DataSource extends Disposable {
 	/* Private Data Providers */
 
 	/**
-	 * Get the branches in a repository.
+	 * Get the full commit message bodies of a batch of commits, on demand (the commit list only
+	 * carries subjects, so bodies are only fetched when they are actually displayed).
 	 * @param repo The path of the repository.
-	 * @param showRemoteBranches Are remote branches shown.
-	 * @param hideRemotes An array of hidden remotes.
-	 * @returns The branch data.
+	 * @param commitHashes The hashes of the commits (validated, as they arrive from the webview).
+	 * @returns A hash -> full message body mapping.
 	 */
-	private getBranches(repo: string, showRemoteBranches: boolean, hideRemotes: ReadonlyArray<string>) {
-		let args = ['branch'];
-		if (showRemoteBranches) args.push('-a');
-		args.push('--no-color');
-
-		const hideRemotePatterns = hideRemotes.map((remote) => 'remotes/' + remote + '/');
-		const showRemoteHeads = getConfig().showRemoteHeads;
-
-		return this.spawnGit(args, repo, (stdout) => {
-			let branchData: GitBranchData = { branches: [], head: null, error: null };
-			let lines = stdout.split(EOL_REGEX);
-			for (let i = 0; i < lines.length - 1; i++) {
-				let name = lines[i].substring(2).split(' -> ')[0];
-				if (INVALID_BRANCH_REGEXP.test(name) || hideRemotePatterns.some((pattern) => name.startsWith(pattern)) || (!showRemoteHeads && REMOTE_HEAD_BRANCH_REGEXP.test(name)) || (name.startsWith('remotes/') && name.indexOf('/tags/') > -1)) {
-					continue;
-				}
-
-				if (lines[i][0] === '*') {
-					branchData.head = name;
-					branchData.branches.unshift(name);
-				} else {
-					branchData.branches.push(name);
-				}
+	public getCommitBodies(repo: string, commitHashes: ReadonlyArray<string>): Promise<{ [hash: string]: string }> {
+		const hashes = commitHashes.filter((hash) => isValidCommitHash(hash));
+		if (hashes.length === 0) return Promise.resolve({});
+		const args = ['-c', 'log.showSignature=false', 'log', '--no-walk', '--format=%H%x1f%B%x1e', ...hashes];
+		return this.spawnGit(args, repo, (stdoutBuf) => {
+			const bodies: { [hash: string]: string } = {};
+			const text = stdoutBuf.toString().replace(/\x1e$/, ''); // trim trailing record separator
+			for (const record of text.split('\x1e')) {
+				const sep = record.indexOf('\x1f');
+				if (sep <= 0) continue;
+				bodies[record.substring(0, sep)] = record.substring(sep + 1).replace(/\n$/, '');
 			}
-			return branchData;
+			return bodies;
 		});
 	}
 
@@ -1937,7 +1952,7 @@ export class DataSource extends Disposable {
 			const commits: GitCommitRecord[] = [];
 			for (const rec of records) {
 				const parts = rec.split(GIT_LOG_SEPARATOR);
-				// parts = [hash, parents, author, email, date, full body]
+				// parts = [hash, parents, author, email, date, subject]
 				if (parts.length < 6) continue;
 				commits.push({
 					hash: parts[0],
@@ -1962,51 +1977,189 @@ export class DataSource extends Disposable {
 	 * @returns The references data.
 	 */
 	private getRefs(repo: string, showRemoteBranches: boolean, showRemoteHeads: boolean, hideRemotes: ReadonlyArray<string>, showChangeRefs: boolean = false) {
-		let args = ['show-ref'];
-		if (!showRemoteBranches) args.push('--heads', '--tags');
-		args.push('-d', '--head');
+		return this.readRefs(repo, { showRemoteBranches: showRemoteBranches, showRemoteHeads: showRemoteHeads, hideRemotes: hideRemotes, showChangeRefs: showChangeRefs }).then((snapshot) => snapshot.refData);
+	}
 
-		const hideRemotePatterns = hideRemotes.map((remote) => 'refs/remotes/' + remote + '/');
+	/**
+	 * Read every ref of a repository that the Git Graph View needs, in a single pass, and cache the
+	 * result for a short period so that the `loadRepoInfo` and `loadCommits` requests of one view
+	 * load share it instead of each scanning the repository's refs again.
+	 *
+	 * The refs are the dominant cost of opening the view on a large repository (particularly a
+	 * Gerrit one, where `refs/remotes/<remote>/changes/*` can hold tens of thousands of refs), so
+	 * the scan is kept as narrow as Git allows - see `loadRefs` for the details.
+	 * @param repo The path of the repository.
+	 * @param options The options determining which refs are returned.
+	 * @returns The refs of the repository.
+	 */
+	private readRefs(repo: string, options: RefReadOptions): Promise<GitRefSnapshot> {
+		const key = JSON.stringify([options.showRemoteBranches, options.showRemoteHeads, options.showChangeRefs, options.hideRemotes]);
+		const now = new Date().getTime();
+		const cached = this.refSnapshotCache.get(repo);
+		if (cached !== undefined && cached.key === key && cached.expiresAt > now) {
+			return cached.promise;
+		}
 
-		return this.spawnGit(args, repo, (stdout) => {
-			let refData: GitRefData = { head: null, heads: [], tags: [], remotes: [] };
-			let lines = stdout.split(EOL_REGEX);
-			for (let i = 0; i < lines.length - 1; i++) {
-				let line = lines[i].split(' ');
-				if (line.length < 2) continue;
+		const promise = this.loadRefs(repo, options).catch((error) => {
+			// Don't cache failures (they may be transient): allow the next call to retry
+			if (this.refSnapshotCache.get(repo)?.promise === promise) this.refSnapshotCache.delete(repo);
+			throw error;
+		});
+		this.refSnapshotCache.set(repo, { key: key, expiresAt: now + REF_SNAPSHOT_CACHE_MS, promise: promise });
+		return promise;
+	}
 
-				let hash = line.shift()!;
-				let ref = line.join(' ');
+	/**
+	 * Invalidate the cached refs of a repository (e.g. because a Git action was run, or a file in
+	 * its `.git` directory changed), so that the next `readRefs` call reloads them from Git.
+	 * @param repo The path of the repository (or NULL to clear the cache of all repositories).
+	 */
+	public invalidateRefCache(repo: string | null) {
+		if (repo === null) {
+			this.refSnapshotCache.clear();
+		} else {
+			this.refSnapshotCache.delete(repo);
+		}
+	}
 
-				if (ref.startsWith('refs/heads/')) {
-					refData.heads.push({ hash: hash, name: ref.substring(11) });
-				} else if (ref.startsWith('refs/tags/')) {
-					let annotated = ref.endsWith('^{}');
-					refData.tags.push({ hash: hash, name: (annotated ? ref.substring(10, ref.length - 3) : ref.substring(10)), annotated: annotated });
-				} else if (ref.startsWith('refs/remotes/')) {
-					if (!hideRemotePatterns.some((pattern) => ref.startsWith(pattern)) && (showRemoteHeads || !ref.endsWith('/HEAD'))) {
-						let remoteRef = ref.substring(13);
-						let tagsIndex = remoteRef.indexOf('/tags/');
-						let changesIndex = remoteRef.indexOf('/changes/');
-						if (tagsIndex > -1) {
-							let annotated = remoteRef.endsWith('^{}');
-							let name = remoteRef.substring(0, tagsIndex) + '/' + remoteRef.substring(tagsIndex + 6);
-							if (annotated) name = name.substring(0, name.length - 3);
-							refData.tags.push({ hash: hash, name: name, annotated: annotated });
-						} else if (changesIndex > -1) {
-							// Gerrit change ref (refs/remotes/<remote>/changes/...) - displayed as a remote branch
-							// ref when "Show Refs" is enabled (NoteDb meta refs are never displayed)
-							if (showChangeRefs && !remoteRef.endsWith('/meta')) refData.remotes.push({ hash: hash, name: remoteRef });
-						} else {
-							refData.remotes.push({ hash: hash, name: remoteRef });
-						}
-					}
-				} else if (ref === 'HEAD') {
-					refData.head = hash;
+	/**
+	 * Read every ref of a repository that the Git Graph View needs.
+	 *
+	 * Git's ref iteration cost is driven by how much of the ref namespace it is asked to walk, and
+	 * by whether it has to open the object that each ref points at (peeling). Both are minimised:
+	 *
+	 * - `show-ref --heads --tags -d --head` reads HEAD, the local branches and the local tags. Even
+	 *   in a repository with tens of thousands of refs this stays in the low milliseconds, because
+	 *   `refs/heads/` and `refs/tags/` are contiguous prefixes that Git can seek straight to. `-d`
+	 *   peels the annotated tags, which is what lets their commits carry the tag label.
+	 * - `for-each-ref refs/remotes/` reads the remote-tracking refs WITHOUT peeling. This is the
+	 *   one unavoidably broad scan, and not peeling it is what makes it affordable: asking Git to
+	 *   peel every remote ref (as a plain `show-ref -d` over the whole namespace does) costs an
+	 *   object lookup per ref, which is several times more expensive than the scan itself.
+	 * - The rare remote TAG refs (`refs/remotes/<remote>/tags/*`, only created by an explicit fetch
+	 *   refspec) are peeled afterwards by a single batched `rev-parse`, so the common case pays
+	 *   nothing for them.
+	 *
+	 * @param repo The path of the repository.
+	 * @param options The options determining which refs are returned.
+	 * @returns The refs of the repository.
+	 */
+	private async loadRefs(repo: string, options: RefReadOptions): Promise<GitRefSnapshot> {
+		const [local, remoteRefs, branchHead] = await Promise.all([
+			// HEAD + the local branches + the (peeled) local tags
+			this.spawnGit(['show-ref', '--heads', '--tags', '-d', '--head'], repo, (stdout) => stdout),
+			// The remote-tracking refs (unpeeled)
+			options.showRemoteBranches
+				? this.spawnGit(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/remotes/'], repo, (stdout) => stdout)
+				: Promise.resolve(''),
+			// The name of the checked-out branch (NULL when HEAD is detached). A constant-time
+			// lookup that runs in parallel with the ref scans, so it never adds to the wall time.
+			this.spawnGit(['symbolic-ref', '-q', '--short', 'HEAD'], repo, (stdout) => stdout.trim() || null).catch(() => null)
+		]);
+
+		const refData: GitRefData = { head: null, heads: [], tags: [], remotes: [] };
+		const branches: string[] = [];
+		const tagNames: string[] = [];
+
+		/* HEAD, the local branches and the local tags */
+		const localLines = local.split(EOL_REGEX);
+		for (let i = 0; i < localLines.length - 1; i++) {
+			const line = localLines[i].split(' ');
+			if (line.length < 2) continue;
+
+			const hash = line.shift()!;
+			const ref = line.join(' ');
+
+			if (ref.startsWith('refs/heads/')) {
+				const name = ref.substring(11);
+				refData.heads.push({ hash: hash, name: name });
+				branches.push(name);
+			} else if (ref.startsWith('refs/tags/')) {
+				const annotated = ref.endsWith('^{}');
+				const name = annotated ? ref.substring(10, ref.length - 3) : ref.substring(10);
+				refData.tags.push({ hash: hash, name: name, annotated: annotated });
+				// The peeled record of an annotated tag repeats a name that was already listed
+				if (!annotated) tagNames.push(name);
+			} else if (ref === 'HEAD') {
+				refData.head = hash;
+			}
+		}
+
+		/* The remote-tracking refs */
+		const hideRemotePatterns = options.hideRemotes.map((remote) => 'refs/remotes/' + remote + '/');
+		const remoteTagRefs: string[] = [];
+		const remoteTagIndexes: number[] = [];
+		const remoteLines = remoteRefs.split(EOL_REGEX);
+		for (let i = 0; i < remoteLines.length; i++) {
+			const separator = remoteLines[i].indexOf(' ');
+			if (separator === -1) continue;
+
+			const hash = remoteLines[i].substring(0, separator);
+			const ref = remoteLines[i].substring(separator + 1);
+			if (!ref.startsWith('refs/remotes/')) continue;
+			if (hideRemotePatterns.some((pattern) => ref.startsWith(pattern)) || (!options.showRemoteHeads && ref.endsWith('/HEAD'))) continue;
+
+			const remoteRef = ref.substring(13);
+			const tagsIndex = remoteRef.indexOf('/tags/');
+			const changesIndex = remoteRef.indexOf('/changes/');
+			if (tagsIndex > -1) {
+				remoteTagIndexes.push(refData.tags.length);
+				remoteTagRefs.push(ref);
+				refData.tags.push({ hash: hash, name: remoteRef.substring(0, tagsIndex) + '/' + remoteRef.substring(tagsIndex + 6), annotated: false });
+			} else if (changesIndex > -1) {
+				// Gerrit change ref (refs/remotes/<remote>/changes/...) - displayed as a remote branch
+				// ref when "Show Refs" is enabled (NoteDb meta refs are never displayed). They are
+				// never offered as branches: a Gerrit repository can hold tens of thousands of them,
+				// which would swamp the Branches dropdown.
+				if (options.showChangeRefs && !remoteRef.endsWith('/meta')) refData.remotes.push({ hash: hash, name: remoteRef });
+			} else {
+				refData.remotes.push({ hash: hash, name: remoteRef });
+				branches.push('remotes/' + remoteRef);
+			}
+		}
+
+		/* Peel the (rare) remote tag refs, so that their commits carry the tag label */
+		if (remoteTagRefs.length > 0) {
+			const peeled = await this.peelRefs(repo, remoteTagRefs);
+			for (let i = 0; i < remoteTagIndexes.length; i++) {
+				const tag = refData.tags[remoteTagIndexes[i]], hash = peeled[i];
+				if (hash !== null && hash !== tag.hash) {
+					refData.tags.push({ hash: hash, name: tag.name, annotated: true });
 				}
 			}
-			return refData;
-		});
+		}
+
+		/* The checked-out branch is listed first, as `git branch` lists it */
+		if (branchHead !== null) {
+			const index = branches.indexOf(branchHead);
+			if (index > 0) branches.splice(index, 1);
+			if (index !== 0) branches.unshift(branchHead);
+		}
+
+		return { refData: refData, branches: branches, branchHead: branchHead, tagNames: tagNames.sort() };
+	}
+
+	/**
+	 * Resolve the commits that a set of refs point at (peeling any annotated tag objects), using a
+	 * single `rev-parse` process per batch of refs.
+	 * @param repo The path of the repository.
+	 * @param refs The full names of the refs to peel.
+	 * @returns The peeled hash of each ref, in the order of `refs` (NULL => it couldn't be peeled).
+	 */
+	private async peelRefs(repo: string, refs: ReadonlyArray<string>): Promise<(string | null)[]> {
+		const peeled: (string | null)[] = [];
+		for (let i = 0; i < refs.length; i += PEEL_REFS_BATCH_SIZE) {
+			const batch = refs.slice(i, i + PEEL_REFS_BATCH_SIZE);
+			const hashes = await this.spawnGit(['rev-parse', '--verify', '-q', ...batch.map((ref) => ref + '^{commit}')], repo, (stdout) =>
+				stdout.split(EOL_REGEX).filter((hash) => hash !== '')
+			).catch(() => <string[]>[]);
+			// `rev-parse -q` omits the refs it can't resolve, so the output only lines up with the
+			// batch when every ref of the batch resolved
+			for (let j = 0; j < batch.length; j++) {
+				peeled.push(hashes.length === batch.length ? hashes[j] : null);
+			}
+		}
+		return peeled;
 	}
 
 	/**
@@ -2073,14 +2226,6 @@ export class DataSource extends Disposable {
 		});
 	}
 
-	private getTags(repo: string) {
-		return this.spawnGit(['tag', '--list'], repo, (stdout) => {
-			const lines = stdout.split(EOL_REGEX);
-			lines.pop();
-			return lines.sort();
-		});
-	}
-
 	/**
 	 * Get the signature of a signed tag.
 	 * @param repo The path of the repository.
@@ -2132,7 +2277,7 @@ export class DataSource extends Disposable {
 	 * @param repo The path of the repository.
 	 * @returns The number of uncommitted changes.
 	 */
-	private getUncommittedChanges(repo: string) {
+	public getUncommittedChanges(repo: string) {
 		return this.spawnGit(['status', '--untracked-files=' + (getConfig().showUntrackedFiles ? 'all' : 'no'), '--porcelain'], repo, (stdout) => {
 			const numLines = stdout.split(EOL_REGEX).length;
 			return numLines > 1 ? numLines - 1 : 0;
@@ -2230,6 +2375,8 @@ export class DataSource extends Disposable {
 	 * @returns The returned ErrorInfo (suitable for being sent to the Git Graph View).
 	 */
 	public runGitCommand(args: string[], repo: string): Promise<ErrorInfo> {
+		// Any of these commands may change the repository's refs, so the cached ref read is dropped
+		this.invalidateRefCache(repo);
 		return this._spawnGit(args, repo, () => null).catch((errorMessage: string) => errorMessage);
 	}
 
@@ -2242,6 +2389,8 @@ export class DataSource extends Disposable {
 	 * @returns The returned ErrorInfo (suitable for being sent to the Git Graph View).
 	 */
 	public runGitCommandWithInput(args: string[], repo: string, input: string): Promise<ErrorInfo> {
+		// Any of these commands may change the repository's refs, so the cached ref read is dropped
+		this.invalidateRefCache(repo);
 		return new Promise<ErrorInfo>((resolve) => {
 			if (this.gitExecutable === null) {
 				return resolve(UNABLE_TO_FIND_GIT_MSG);
@@ -2437,7 +2586,7 @@ interface GitCommitRecord {
 	message: string;
 }
 
-interface GitCommitData {
+export interface GitCommitData {
 	commits: GitCommit[];
 	head: string | null;
 	tags: string[];
@@ -2471,6 +2620,29 @@ interface GitRefData {
 	heads: GitRef[];
 	tags: GitRefTag[];
 	remotes: GitRef[];
+}
+
+/** The options that determine which refs a ref read returns (and therefore its cache key). */
+interface RefReadOptions {
+	showRemoteBranches: boolean;
+	showRemoteHeads: boolean;
+	hideRemotes: ReadonlyArray<string>;
+	showChangeRefs: boolean;
+}
+
+/**
+ * The refs of a repository, read in a single pass, in both of the forms the Git Graph View needs:
+ * the refs annotated onto the commits of the graph (`getCommits`), and the branch & tag names
+ * offered by the view's dropdowns (`getRepoInfo`).
+ */
+interface GitRefSnapshot {
+	refData: GitRefData;
+	/** The branch names, in the order `git branch` lists them (the checked-out branch first). */
+	branches: string[];
+	/** The name of the checked-out branch, or NULL when HEAD is detached. */
+	branchHead: string | null;
+	/** The names of the local tags, sorted. */
+	tagNames: string[];
 }
 
 interface GitRepoInfo extends GitBranchData {

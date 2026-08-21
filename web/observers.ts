@@ -55,6 +55,12 @@ function applyGraphColumnAutoLayout(view: GitGraphView) {
 
 
 
+	// Reset any padding this function applied on a previous call before measuring: otherwise
+	// colWidth reflects that stale, JS-inflated padding instead of the column's base CSS
+	// padding, and deriving new padding from it makes the graph column width oscillate between
+	// calls while the window is being resized.
+	graphColElem.style.padding = '';
+
 	let colWidth = graphColElem.offsetWidth, graphWidth = view.graph.getContentWidth();
 
 	let maxWidth = Math.round(view.viewElem.clientWidth * 0.333);
@@ -185,11 +191,19 @@ function observeViewScroll(view: GitGraphView) {
 
 	let timeout: number | null = null;
 
+	let virtualRafId: number | null = null;
+
 	view.viewElem.addEventListener('scroll', () => {
 
 		const scrollTop = view.viewElem.scrollTop;
 
-
+		// Windowed rendering: re-render the visible commit rows (and the graph vertices) around the
+		// new scroll position, coalesced into one update per animation frame
+		if (virtualRafId !== null) cancelAnimationFrame(virtualRafId);
+		virtualRafId = requestAnimationFrame(() => {
+			virtualRafId = null;
+			view.updateVirtualWindow();
+		});
 
 		if (view.config.loadMoreCommitsAutomatically && view.moreCommitsAvailable && !view.currentRepoRefreshState.inProgress) {
 

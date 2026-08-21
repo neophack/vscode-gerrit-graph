@@ -54,20 +54,16 @@ declare global {
 		readonly gitRemotes: ReadonlyArray<string>;
 		readonly gitStashes: ReadonlyArray<GG.GitStash>;
 		readonly gitTags: ReadonlyArray<string>;
-		readonly commits: GG.GitCommit[];
 		readonly commitHead: string | null;
-		readonly avatars: AvatarImageCollection;
 		readonly currentBranches: string[] | null;
 		readonly currentAuthors: string[] | null;
 		readonly moreCommitsAvailable: boolean;
 		readonly maxCommits: number;
 		readonly onlyFollowFirstParent: boolean;
-		readonly expandedCommit: ExpandedCommit | null;
 		readonly scrollTop: number;
 		readonly findWidget: FindWidgetState;
 		readonly settingsWidget: SettingsWidgetState;
 		readonly gerritStatusFilter?: GG.GerritStatusFilter | null;
-		readonly gerritStates?: { [hash: string]: GG.GerritChangeState };
 		readonly commitPathFilter?: string | null; // only show commits that modified the file(s) at this path
 	}
 

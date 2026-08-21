@@ -45,6 +45,25 @@ class GitGraphView {
 	private gerritStatesDirty: boolean = false;
 
 	/**
+	 * Full commit message bodies, fetched on demand (the commit list only carries subjects, so the
+	 * bodies are only requested for the rows that are actually rendered with "Show Commit Body
+	 * Inline" enabled). Keyed by commit hash.
+	 */
+	private commitBodies: { [hash: string]: string } = {};
+	private readonly commitBodiesRequested = new Set<string>(); // hashes already requested (avoids re-requesting)
+	private static readonly COMMIT_BODIES_BATCH_LIMIT = 200;
+
+	/**
+	 * Windowed ("virtualized") rendering: when the loaded commit list is large, only the rows in
+	 * and near the viewport are rendered, with spacer rows above and below preserving the scroll
+	 * height and the graph alignment. NULL => all rows are rendered (small lists, or any state
+	 * with variable row heights: an open Commit Details View, expanded Gerrit meta rows, an active
+	 * find query).
+	 */
+	private renderedRange: { start: number, end: number } | null = null;
+	private static readonly VIRTUAL_ROW_BUFFER = 10;
+
+	/**
 	 * Check whether a Gerrit change state passes the status filter (applied locally by the Webview,
 	 * mirroring the extension's `filterChangeStates`, so toggling the filter chips re-renders the
 	 * badges instantly without reloading the commits).
@@ -171,25 +190,20 @@ class GitGraphView {
 		observeUrls(this);
 		observeTableEvents(this);
 
-		if (prevState && !prevState.currentRepoLoading && typeof this.gitRepos[prevState.currentRepo] !== 'undefined') {
-			this.currentRepo = prevState.currentRepo;
-			this.currentBranches = prevState.currentBranches;
-			this.currentAuthors = prevState.currentAuthors;
-			this.maxCommits = prevState.maxCommits;
-			this.expandedCommit = prevState.expandedCommit;
-			this.avatars = prevState.avatars;
-			this.gitConfig = prevState.gitConfig;
-			if (prevState.gerritStates !== undefined) this.gerritStates = prevState.gerritStates; // restore the Gerrit badges together with the commits
-			this.loadRepoInfo(prevState.gitBranches, prevState.gitBranchHead, prevState.gitRemotes, prevState.gitStashes, true);
-			this.loadCommits(prevState.commits, prevState.commitHead, prevState.gitTags, prevState.moreCommitsAvailable, prevState.onlyFollowFirstParent);
+		if (prevState) {
+			// Only the lightweight state is restored directly (find widget, settings widget): the
+			// commit list is NOT persisted, so after a webview reload the repository is always
+			// reloaded (via the loadViewTo path below)
 			this.findWidget.restoreState(prevState.findWidget);
 			this.settingsWidget.restoreState(prevState.settingsWidget);
-			this.showRemoteBranchesElem.checked = getShowRemoteBranches(this.gitRepos[prevState.currentRepo].showRemoteBranchesV2);
 		}
 
 		let loadViewTo = initialState.loadViewTo;
-		if (loadViewTo === null && prevState && prevState.currentRepoLoading && typeof prevState.currentRepo !== 'undefined') {
-			loadViewTo = { repo: prevState.currentRepo };
+		if (loadViewTo === null && prevState && typeof prevState.currentRepo !== 'undefined') {
+			// Reload the previously open repository after a webview reload, re-applying its path filter
+			loadViewTo = prevState.commitPathFilter !== null && prevState.commitPathFilter !== undefined
+				? { repo: prevState.currentRepo, filterPath: prevState.commitPathFilter }
+				: { repo: prevState.currentRepo };
 		}
 
 		if (!this.loadRepos(this.gitRepos, initialState.lastActiveRepo, loadViewTo)) {
@@ -645,6 +659,9 @@ class GitGraphView {
 		this.commitHead = null;
 		this.commitLookup = {};
 		this.renderedGitBranchHead = null;
+		this.commitBodies = {};
+		this.commitBodiesRequested.clear();
+		this.renderedRange = null;
 		closeCommitDetails(this, false);
 		this.saveState();
 		this.graph.loadCommits(this.commits, this.commitHead, this.commitLookup, this.onlyFollowFirstParent);
@@ -665,7 +682,17 @@ class GitGraphView {
 	public processLoadCommitsResponse(msg: GG.ResponseLoadCommits) {
 		if (msg.error === null) {
 			const refreshState = this.currentRepoRefreshState;
-			if (refreshState.inProgress && refreshState.loadCommitsRefreshId === msg.refreshId) {
+			// A loadCommits request can be answered by MULTIPLE responses with the same refresh id:
+			// the deferred "Uncommitted Changes" follow-up, and the staged Gerrit responses of a
+			// cold-cache load, both arrive after the first non-pending response finalised the refresh
+			// (inProgress === false). The refresh id alone identifies whether the response belongs to
+			// the current view state: every new request increments it.
+			// A loadCommits request can be answered by MULTIPLE responses with the same refresh id:
+			// the deferred "Uncommitted Changes" follow-up, and the staged Gerrit responses of a
+			// cold-cache load, both arrive after the first non-pending response finalised the refresh
+			// (inProgress === false). The refresh id alone identifies whether the response belongs to
+			// the current view state: every new request increments it.
+			if (refreshState.loadCommitsRefreshId === msg.refreshId) {
 				// Update the Gerrit change states (badges/timelines); force a re-render if they changed
 				const newStates: { [hash: string]: GG.GerritChangeState } = {};
 				if (msg.gerritStates !== null) {
@@ -918,22 +945,15 @@ class GitGraphView {
 	/* State */
 
 	public saveState() {
-		let expandedCommit;
-		if (this.expandedCommit !== null) {
-			expandedCommit = Object.assign({}, this.expandedCommit);
-			expandedCommit.commitElem = null;
-			expandedCommit.compareWithElem = null;
-			expandedCommit.contextMenuOpen = {
-				summary: false,
-				fileView: -1
-			};
-		} else {
-			expandedCommit = null;
-		}
-
+		// The persisted state is a LIGHTWEIGHT snapshot: the commit list (even subject-only),
+		// avatars and Gerrit states are deliberately NOT included - cloning them into the webview
+		// state on every save (which fires on every scroll, toggle and paging load) is O(n) per
+		// interaction on large repositories. After a webview reload the repository is simply
+		// reloaded (the extension's commit cache makes that fast), restoring the scroll target via
+		// the loadViewTo path.
 		VSCODE_API.setState({
 			currentRepo: this.currentRepo,
-			currentRepoLoading: this.currentRepoLoading,
+			currentRepoLoading: true, // always reload the repo data after a webview reload
 			gitRepos: this.gitRepos,
 			gitBranches: this.gitBranches,
 			gitBranchHead: this.gitBranchHead,
@@ -941,20 +961,16 @@ class GitGraphView {
 			gitRemotes: this.gitRemotes,
 			gitStashes: this.gitStashes,
 			gitTags: this.gitTags,
-			commits: this.commits,
 			commitHead: this.commitHead,
-			avatars: this.avatars,
 			currentBranches: this.currentBranches,
 			currentAuthors: this.currentAuthors,
 			moreCommitsAvailable: this.moreCommitsAvailable,
 			maxCommits: this.maxCommits,
 			onlyFollowFirstParent: this.onlyFollowFirstParent,
-			expandedCommit: expandedCommit,
 			scrollTop: this.scrollTop,
 			findWidget: this.findWidget.getState(),
 			settingsWidget: this.settingsWidget.getState(),
 			gerritStatusFilter: this.gerritStatusFilter,
-			gerritStates: this.gerritStates,
 			commitPathFilter: this.commitPathFilter
 		});
 	}
@@ -1058,7 +1074,7 @@ class GitGraphView {
 		}
 		for (const pinned of pinnedCommits) {
 			const hash = escapeHtml(pinned.hash);
-			const summary = escapeHtml(pinned.summary);
+			const summary = escapeHtml(pinned.summary.length > 30 ? pinned.summary.substring(0, 30) + '…' : pinned.summary);
 			html += '<span class="pinnedChip" data-type="commit" data-value="' + hash + '" title="Jump to commit ' + hash + ' (click ✕ to unpin)">\uD83D\uDCCC <b>' + abbrevCommit(pinned.hash) + '</b>' + (summary !== '' ? ' ' + summary : '') +
 				'<span class="pinnedChipRemove" data-type="commit" data-value="' + hash + '" title="Unpin commit ' + hash + '">&times;</span></span>';
 		}
@@ -1135,7 +1151,7 @@ class GitGraphView {
 			: this.config.graph.grid.y;
 		this.config.graph.grid.offsetY = headerHeight + this.config.graph.grid.y / 2;
 
-		this.graph.render(expandedCommit, metaExpansions);
+		this.graph.render(expandedCommit, metaExpansions, this.renderedRange);
 	}
 
 	/**
@@ -1198,12 +1214,15 @@ class GitGraphView {
 		let body = '';
 
 		if (this.config.showBodyInline) {
-			let splitMessage = commit.message.split(/\r?\n/);
-
-			if (splitMessage.length > 1) {
-				subject = splitMessage[0];
-				splitMessage.shift();
-				body = splitMessage.join(' ').replace(/\s+/g, ' ').trim();
+			// The full body is fetched on demand (the commit list only carries subjects)
+			const fullMessage = this.commitBodies[commit.hash];
+			if (typeof fullMessage === 'string') {
+				let splitMessage = fullMessage.split(/\r?\n/);
+				if (splitMessage.length > 1) {
+					subject = splitMessage[0];
+					splitMessage.shift();
+					body = splitMessage.join(' ').replace(/\s+/g, ' ').trim();
+				}
 			}
 		}
 
@@ -1287,6 +1306,55 @@ class GitGraphView {
 		return html;
 	}
 
+	/**
+	 * Should the commit table be rendered windowed (only the rows in and near the viewport, with
+	 * spacer rows preserving the scroll height)? Requires uniform row heights, so any state with
+	 * variable-height rows (open Commit Details View, expanded Gerrit meta rows) or that needs
+	 * every row in the DOM (an active find query) falls back to a full render.
+	 */
+	private canVirtualize() {
+		if (this.commits.length <= 100) return false; // small lists: not worth the window churn
+		if (!(this.config.graph.rowHeight > 0)) return false; // no uniform row height available
+		if (this.expandedCommit !== null) return false;
+		if (this.findWidget.isSearching()) return false;
+		const expandedChanges = this.gerritExpandedChanges[this.currentRepo];
+		if (expandedChanges !== undefined && Object.keys(expandedChanges).length > 0) return false;
+		if (this.viewElem.clientHeight <= 0) return false; // unmeasured (e.g. hidden view): keep a full render
+		return true;
+	}
+
+	/**
+	 * Compute the range of commit rows to render (viewport plus a buffer).
+	 */
+	private computeVisibleRange() {
+		const rowHeight = this.config.graph.rowHeight;
+		const start = Math.max(0, Math.floor((this.viewElem.scrollTop - this.getHeaderHeight()) / rowHeight) - GitGraphView.VIRTUAL_ROW_BUFFER);
+		const count = Math.ceil(this.viewElem.clientHeight / rowHeight) + 1 + 2 * GitGraphView.VIRTUAL_ROW_BUFFER;
+		return { start: start, end: Math.min(this.commits.length, start + count) };
+	}
+
+	/**
+	 * A spacer row standing in for `rows` unrendered commit rows, keeping the scroll height (and
+	 * with it the scroll bar and the "Load More Commits" bottom detection) proportional to the full
+	 * commit list.
+	 */
+	private getSpacerRowHtml(rows: number) {
+		if (rows <= 0) return '';
+		return '<tr class="virtSpacer" aria-hidden="true"><td colspan="' + this.getNumColumns() + '" style="height:' + (rows * this.config.graph.rowHeight) + 'px;padding:0"></td></tr>';
+	}
+
+	/**
+	 * Re-render the visible window after the view was scrolled (no-op unless windowed rendering is
+	 * active and the window actually moved).
+	 */
+	public updateVirtualWindow() {
+		if (this.renderedRange === null) return;
+		const range = this.computeVisibleRange();
+		if (range.start === this.renderedRange.start && range.end === this.renderedRange.end) return;
+		this.renderTable();
+		this.renderGraph();
+	}
+
 	private renderTable() {
 		const ctx = this.createRowRenderingContext();
 		const colVisibility = ctx.colVisibility;
@@ -1297,8 +1365,19 @@ class GitGraphView {
 			(colVisibility.commit ? '<th class="tableColHeader commitCol" data-col="4">Commit</th>' : '') +
 			'</tr>';
 
-		for (let i = 0; i < this.commits.length; i++) {
+		this.renderedRange = this.canVirtualize() ? this.computeVisibleRange() : null;
+		let from = 0, to = this.commits.length;
+		if (this.renderedRange !== null) {
+			from = this.renderedRange.start;
+			to = this.renderedRange.end;
+			html += this.getSpacerRowHtml(from);
+		}
+
+		for (let i = from; i < to; i++) {
 			html += this.getCommitRowHtml(i, ctx);
+		}
+		if (this.renderedRange !== null) {
+			html += this.getSpacerRowHtml(this.commits.length - to);
 		}
 		this.tableElem.innerHTML = '<table>' + html + '</table>';
 		this.footerElem.innerHTML = this.moreCommitsAvailable ? '<div id="loadMoreCommitsBtn" class="roundedBtn">Load More Commits</div>' : '';
@@ -1348,6 +1427,42 @@ class GitGraphView {
 				}
 			}
 		}
+
+		this.requestCommitBodiesForRows(from, to);
+	}
+
+	/**
+	 * Request the full message bodies of the commits in the given (rendered) row range, on demand:
+	 * the commit list only carries subjects, and bodies are only displayed when "Show Commit Body
+	 * Inline" is enabled (no-op otherwise).
+	 */
+	private requestCommitBodiesForRows(from: number, to: number) {
+		if (!this.config.showBodyInline) return;
+		const missing: string[] = [];
+		for (let i = from; i < to && missing.length < GitGraphView.COMMIT_BODIES_BATCH_LIMIT; i++) {
+			const commit = this.commits[i];
+			if (commit.hash === UNCOMMITTED || commit.stash !== null) continue;
+			if (typeof this.commitBodies[commit.hash] !== 'string' && !this.commitBodiesRequested.has(commit.hash)) {
+				this.commitBodiesRequested.add(commit.hash);
+				missing.push(commit.hash);
+			}
+		}
+		if (missing.length > 0) sendMessage({ command: 'commitBodies', repo: this.currentRepo, commitHashes: missing });
+	}
+
+	/**
+	 * Store a batch of commit message bodies fetched on demand, and re-render the rows so the
+	 * inline bodies ("Show Commit Body Inline") become visible.
+	 */
+	public processCommitBodies(msg: GG.ResponseCommitBodies) {
+		let received = false;
+		for (const hash in msg.bodies) {
+			this.commitBodies[hash] = msg.bodies[hash];
+			received = true;
+		}
+		if (!received) return;
+		this.renderTable();
+		this.renderGraph();
 	}
 
 	/**
@@ -1357,6 +1472,13 @@ class GitGraphView {
 	 * scrolling through a large repository quadratically expensive.
 	 */
 	private appendCommitRows(fromIndex: number) {
+		if (this.renderedRange !== null) {
+			// Windowed rendering is active: the appended rows are outside the rendered window
+			// unless the user is at the very bottom, so simply re-render the (small) window - the
+			// spacers absorb the appended rows and keep the scroll height correct
+			this.renderTable();
+			return;
+		}
 		const ctx = this.createRowRenderingContext();
 		let html = '';
 		for (let i = fromIndex; i < this.commits.length; i++) {
@@ -1377,6 +1499,7 @@ class GitGraphView {
 		}
 		this.findWidget.refresh();
 		this.renderedGitBranchHead = this.gitBranchHead;
+		this.requestCommitBodiesForRows(fromIndex, this.commits.length);
 	}
 
 
@@ -1409,8 +1532,10 @@ class GitGraphView {
 
 
 	private renderUncommittedChanges() {
+		const uncommittedElem = document.getElementById('uncommittedChanges');
+		if (uncommittedElem === null) return; // not rendered (e.g. outside the windowed render range)
 		const colVisibility = this.getColumnVisibility(), date = formatShortDate(this.commits[0].date);
-		document.getElementById('uncommittedChanges')!.innerHTML = '<td></td><td><b>' + escapeHtml(this.commits[0].message) + '</b></td>' +
+		uncommittedElem.innerHTML = '<td></td><td><b>' + escapeHtml(this.commits[0].message) + '</b></td>' +
 			(colVisibility.date ? '<td class="dateCol text" title="' + date.title + '">' + date.formatted + '</td>' : '') +
 			(colVisibility.author ? '<td class="authorCol text" title="* <>">*</td>' : '') +
 			(colVisibility.commit ? '<td class="text" title="*">*</td>' : '');
@@ -1566,7 +1691,29 @@ class GitGraphView {
 	 * @param flash Should the commit flash after it has been scrolled to.
 	 */
 	public scrollToCommit(hash: string, alwaysCenterCommit: boolean, flash: boolean = false) {
-		const elem = findCommitElemWithId(this.getCommitId(hash));
+		const id = this.getCommitId(hash);
+		if (id === null) return;
+
+		if (this.renderedRange !== null) {
+			// Windowed rendering: the row's position derives from its index (uniform row heights),
+			// then the window is re-rendered around the new scroll position so the row exists
+			const colHeadersElem = document.getElementById('tableColHeaders');
+			const elemTop = this.getHeaderHeight() + (colHeadersElem !== null ? colHeadersElem.offsetHeight : this.config.graph.rowHeight) + id * this.config.graph.rowHeight;
+			if (alwaysCenterCommit || elemTop - 8 < this.viewElem.scrollTop || elemTop + 32 - this.viewElem.clientHeight > this.viewElem.scrollTop) {
+				this.viewElem.scroll(0, Math.max(0, elemTop + 12 - this.viewElem.clientHeight / 2));
+			}
+			this.updateVirtualWindow();
+			const virtualElem = findCommitElemWithId(id);
+			if (flash && virtualElem !== null && !virtualElem.classList.contains('flash')) {
+				virtualElem.classList.add('flash');
+				setTimeout(() => {
+					virtualElem.classList.remove('flash');
+				}, 850);
+			}
+			return;
+		}
+
+		const elem = findCommitElemWithId(id);
 		if (elem === null) return;
 
 		let elemTop = this.getHeaderHeight() + elem.offsetTop;
@@ -1852,6 +1999,9 @@ window.addEventListener('load', () => {
 				break;
 			case 'gerritAutosquash':
 				refreshOrDisplayError(msg.error, 'Unable to Fixup/Squash Commit');
+				break;
+			case 'commitBodies':
+				gitGraph.processCommitBodies(msg);
 				break;
 			case 'loadCommits':
 				gitGraph.processLoadCommitsResponse(msg);

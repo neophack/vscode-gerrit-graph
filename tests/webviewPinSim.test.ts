@@ -76,7 +76,24 @@ const VIEW_HTML = '<div id="view" tabindex="-1">' +
 	'<div id="content"><div id="commitGraph"></div><div id="commitTable"></div></div>' +
 	'<div id="footer"></div></div>';
 
+// jsdom shares one window across the tests of this file: record every listener the bundle
+// registers on the persistent nodes (window / document / body) and remove them at the start of
+// each loadWebview() call, so the bundle instances of earlier tests no longer respond to
+// dispatched messages or events (in production, resetting the webview HTML tears the old page down).
+const recordedListeners: { target: any, type: string, cb: any }[] = [];
+for (const target of [window, document, document.body]) {
+	const origAddEventListener = target.addEventListener.bind(target);
+	target.addEventListener = (type: any, cb: any, ...rest: any[]) => {
+		recordedListeners.push({ target: target, type: type, cb: cb });
+		return origAddEventListener(type, cb, ...rest);
+	};
+}
+function removeStaleListeners() {
+	for (const listener of recordedListeners.splice(0)) listener.target.removeEventListener(listener.type, listener.cb);
+}
+
 function loadWebview(state: any) {
+	removeStaleListeners();
 	document.body.innerHTML = VIEW_HTML;
 	(globalThis as any).acquireVsCodeApi = () => ({
 		postMessage: (msg: any) => { sentMessages.push(msg); return undefined; },
@@ -142,6 +159,16 @@ describe('Webview pin simulation', () => {
 		loadWebview(makeState());
 		respondToInitialLoad([COMMIT_OTHER]);
 		expect(document.getElementById('pinnedControls').style.display).toBe('none');
+	});
+
+	test('a pinned commit summary longer than 30 characters is truncated with an ellipsis', () => {
+		const longSummary = 'This is a very long commit summary that should be truncated';
+		loadWebview(makeState([{ hash: PINNED_HASH, summary: longSummary }]));
+		respondToInitialLoad([COMMIT_PINNED, COMMIT_OTHER]);
+
+		const chip = Array.from(document.querySelectorAll('.pinnedChip')).find((c: any) => c.dataset.type === 'commit') as any;
+		expect(chip.textContent).toContain(longSummary.substring(0, 30) + '…');
+		expect(chip.textContent).not.toContain(longSummary.substring(30));
 	});
 
 	test('clicking a pinned commit chip scrolls the view to the commit', () => {
