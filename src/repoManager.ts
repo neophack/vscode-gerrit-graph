@@ -28,6 +28,7 @@ export class RepoManager extends Disposable {
 	private repos: GitRepoSet;
 	private ignoredRepos: string[];
 	private maxDepthOfRepoSearch: number;
+	private readonly pinsWriteInFlight: Set<string> = new Set(); // repos whose pinned branches/commits are currently being persisted to the External Configuration File
 
 	private readonly folderWatchers: { [workspace: string]: vscode.FileSystemWatcher } = {};
 	private readonly configWatcher: vscode.FileSystemWatcher;
@@ -432,9 +433,9 @@ export class RepoManager extends Disposable {
 	 * @param state The state.
 	 */
 	public setRepoState(repo: string, state: GitRepoState) {
+		// The state (and its pinned arrays) arrive deserialized over postMessage, so compare by value
 		const pinsChanged = !this.isKnownRepo(repo)
-			|| this.repos[repo].pinnedBranches !== state.pinnedBranches
-			|| this.repos[repo].pinnedCommits !== state.pinnedCommits;
+			|| !pinsEqual(this.repos[repo], state);
 		this.repos[repo] = state;
 		this.extensionState.saveRepos(this.repos);
 		if (pinsChanged) {
@@ -451,14 +452,16 @@ export class RepoManager extends Disposable {
 		if (state === undefined) {
 			return;
 		}
+		this.pinsWriteInFlight.add(repo);
 		readExternalConfigFile(repo).then((file) => {
 			if (!this.isKnownRepo(repo) || this.repos[repo] !== state) {
+				this.pinsWriteInFlight.delete(repo);
 				return;
 			}
 			const contents: ExternalRepoConfig.File = file !== null ? Object.assign({}, file) : {};
 			contents.pinnedBranches = state.pinnedBranches;
 			contents.pinnedCommits = state.pinnedCommits;
-			writeExternalConfigFile(repo, contents).catch(showErrorMessage);
+			writeExternalConfigFile(repo, contents).catch(showErrorMessage).then(() => this.pinsWriteInFlight.delete(repo));
 		});
 	}
 
@@ -679,10 +682,13 @@ export class RepoManager extends Disposable {
 		try {
 			const file = await readExternalConfigFile(repo);
 			const state = this.repos[repo];
-			if (state && file !== null) {
+			if (state && file !== null && !this.pinsWriteInFlight.has(repo)) {
+				// Skip importing pins while a write is in flight: the watcher event that triggered
+				// this check may be our own write, and importing the file's (older) pins would
+				// silently revert the user's pins in memory before they are written back
 				const pinnedBranches = Array.isArray(file.pinnedBranches) ? file.pinnedBranches : [];
 				const pinnedCommits = Array.isArray(file.pinnedCommits) ? file.pinnedCommits : [];
-				if (state.pinnedBranches !== pinnedBranches || state.pinnedCommits !== pinnedCommits) {
+				if (!pinsEqual(state, { pinnedBranches, pinnedCommits })) {
 					state.pinnedBranches = pinnedBranches;
 					state.pinnedCommits = pinnedCommits;
 					this.extensionState.saveRepos(this.repos);
@@ -1125,4 +1131,19 @@ function applyExternalConfigFile(file: Readonly<ExternalRepoConfig.File>, state:
 	if (typeof file.showTags !== 'undefined') {
 		state.showTags = file.showTags ? BooleanOverride.Enabled : BooleanOverride.Disabled;
 	}
+}
+
+/**
+ * Compare the pinned branches and commits of two repository states by value.
+ * @param a The first repository state (or a partial state with the pins to compare).
+ * @param b The second repository state.
+ * @returns TRUE if both the pinned branches and pinned commits are equal.
+ */
+function pinsEqual(a: Pick<GitRepoState, 'pinnedBranches' | 'pinnedCommits'>, b: Pick<GitRepoState, 'pinnedBranches' | 'pinnedCommits'>) {
+	if (a.pinnedBranches.length !== b.pinnedBranches.length || a.pinnedCommits.length !== b.pinnedCommits.length) return false;
+	return a.pinnedBranches.every((branch, i) => branch === b.pinnedBranches[i])
+		&& a.pinnedCommits.every((commit, i) => {
+			const other = b.pinnedCommits[i];
+			return other !== undefined && commit.hash === other.hash && commit.summary === other.summary;
+		});
 }

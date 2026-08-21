@@ -228,7 +228,10 @@ class FindWidget {
 				this.widgetElem.setAttribute(ATTR_ERROR, e.message);
 			}
 			if (findPattern !== null && findGlobalPattern !== null) {
-				let commitElems = getCommitElems(), j = 0, commit, zeroLengthMatch = false;
+				// A static snapshot: getCommitElems() returns a live HTMLCollection, and commitElems.length /
+				// commitElems[j] are read on every iteration of the loop below - re-deriving that live
+				// collection on each access turned this into an O(n^2) scan over the full commit list.
+				let commitElems = Array.from(getCommitElems()) as HTMLElement[], j = 0, commit, zeroLengthMatch = false;
 
 				// Search the commit data itself to detect commits that match, so that dom tree traversal is performed on matching commit rows (for performance)
 				const commits = this.view.getCommits();

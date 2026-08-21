@@ -314,7 +314,7 @@ class Vertex {
 
 	/* Rendering */
 
-	public draw(svg: SVGElement, config: GG.GraphConfig, offset: number, overListener: (event: MouseEvent) => void, outListener: (event: MouseEvent) => void) {
+	public draw(svg: SVGElement, config: GG.GraphConfig, offset: number) {
 		if (this.onBranch === null) return;
 
 		const colour = this.isCommitted ? config.colours[this.onBranch.getColour() % config.colours.length] : '#808080';
@@ -344,9 +344,6 @@ class Vertex {
 			innerCircle.setAttribute('class', 'stashInner');
 			svg.appendChild(innerCircle);
 		}
-
-		circle.addEventListener('mouseover', overListener);
-		circle.addEventListener('mouseout', outListener);
 	}
 }
 
@@ -471,7 +468,6 @@ class Graph {
 			this.branches[i].draw(group, this.config, this.expansions);
 		}
 
-		const overListener = (e: MouseEvent) => this.vertexOver(e), outListener = (e: MouseEvent) => this.vertexOut(e);
 		// this.expansions is sorted by index, so the offset for each vertex (in increasing index
 		// order) can be accumulated in a single pass, instead of rescanning all expansions per vertex
 		let expansionOffset = 0, nextExpansion = 0;
@@ -480,8 +476,20 @@ class Graph {
 				expansionOffset += this.expansions[nextExpansion].height;
 				nextExpansion++;
 			}
-			this.vertices[i].draw(group, this.config, expansionOffset, overListener, outListener);
+			this.vertices[i].draw(group, this.config, expansionOffset);
 		}
+
+		// A single pair of delegated listeners on `group` (recreated together with every vertex on
+		// each render, so there's no risk of accumulating stale listeners across renders) replaces
+		// what was previously one addEventListener('mouseover'/'mouseout') pair PER VERTEX CIRCLE.
+		// Only vertex circles carry a `dataset.id` (branch line paths and the stash inner dot don't),
+		// so this fires in exactly the same cases the old per-circle listeners did.
+		group.addEventListener('mouseover', (e) => {
+			if (e.target !== null && (<HTMLElement>e.target).dataset.id !== undefined) this.vertexOver(e);
+		});
+		group.addEventListener('mouseout', (e) => {
+			if (e.target !== null && (<HTMLElement>e.target).dataset.id !== undefined) this.vertexOut(e);
+		});
 
 		if (this.group !== null) this.svg.removeChild(this.group);
 		this.svg.appendChild(group);

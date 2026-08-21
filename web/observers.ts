@@ -47,13 +47,15 @@ function applyGraphColumnAutoLayout(view: GitGraphView) {
 
 
 
-	const cols = <HTMLCollectionOf<HTMLElement>>document.getElementsByClassName('tableColHeader');
+	// Only the Graph column header is needed here: look it up directly by id (its class-based
+	// collection is scanned separately - and more expensively, on a large table - by makeTableResizable).
+	const graphColElem = document.getElementById('tableHeaderGraphCol');
 
-	if (cols.length === 0) return;
+	if (graphColElem === null) return;
 
 
 
-	let colWidth = cols[0].offsetWidth, graphWidth = view.graph.getContentWidth();
+	let colWidth = graphColElem.offsetWidth, graphWidth = view.graph.getContentWidth();
 
 	let maxWidth = Math.round(view.viewElem.clientWidth * 0.333);
 
@@ -81,11 +83,11 @@ function applyGraphColumnAutoLayout(view: GitGraphView) {
 
 	if (colWidth < Math.max(graphWidth, 64)) {
 
-		cols[0].style.padding = '6px ' + Math.floor((Math.max(graphWidth, 64) - (colWidth - COLUMN_LEFT_RIGHT_PADDING)) / 2) + 'px';
+		graphColElem.style.padding = '6px ' + Math.floor((Math.max(graphWidth, 64) - (colWidth - COLUMN_LEFT_RIGHT_PADDING)) / 2) + 'px';
 
 	} else {
 
-		cols[0].style.padding = '';
+		graphColElem.style.padding = '';
 
 	}
 
@@ -943,7 +945,11 @@ function observeTableEvents(view: GitGraphView) {
 
 function makeTableResizable(view: GitGraphView) {
 
-	let colHeadersElem = document.getElementById('tableColHeaders')!, cols = <HTMLCollectionOf<HTMLElement>>document.getElementsByClassName('tableColHeader');
+	// Every .tableColHeader element is a direct child of colHeadersElem, so read them from there
+	// instead of document.getElementsByClassName: that searches the whole document (every cell of
+	// every commit row) for a handful of matches, and - being a live HTMLCollection - would also
+	// re-run that document-wide scan on every .length/indexed access below if captured directly.
+	let colHeadersElem = document.getElementById('tableColHeaders')!, cols = Array.from(colHeadersElem.children) as HTMLElement[];
 
 	let columnWidths: GG.ColumnWidth[], mouseX = -1, col = -1, colIndex = -1;
 
@@ -1093,11 +1099,18 @@ function makeTableResizable(view: GitGraphView) {
 
 
 
-	addListenerToClass('resizeCol', 'mousedown', (e) => {
+	// Every commit row (not just the header) carries its own pair of .resizeCol handles, so the
+	// hit area spans the table's full height - with hundreds/thousands of loaded commits that's
+	// thousands of elements. A single delegated listener on the <table> just inserted by
+	// renderTable() (torn down and recreated together with all of them on the next render, so
+	// there's no risk of accumulating stale listeners across renders) replaces what was previously
+	// one addEventListener call per handle, and was the dominant cost of a full render.
+	const tableRootElem = <HTMLElement>view.tableElem.firstElementChild;
+	tableRootElem.addEventListener('mousedown', (e) => {
+		const resizeColElem = e.target !== null ? (<HTMLElement>e.target).closest('.resizeCol') : null;
+		if (resizeColElem === null) return;
 
-		if (e.target === null) return;
-
-		col = parseInt((<HTMLElement>e.target).dataset.col!);
+		col = parseInt((<HTMLElement>resizeColElem).dataset.col!);
 
 		while (columnWidths[col] === COLUMN_HIDDEN) col--;
 

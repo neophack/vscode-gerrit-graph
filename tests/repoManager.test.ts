@@ -2182,7 +2182,8 @@ describe('RepoManager', () => {
 			const repoState = repoManager.getRepos()['/path/to/workspace-folder1/repo1'];
 			expect(repoState.name).toBe(null);
 			expect(repoState.lastImportAt).toBe(1587559258000);
-			expect(spyOnSaveRepos).toHaveBeenCalledTimes(2);
+			// The file's pins are identical to the current state, so only the lastImportAt update saves
+			expect(spyOnSaveRepos).toHaveBeenCalledTimes(1);
 		});
 
 		it('Shouldn\'t import the repository configuration when user cancels the modal', async () => {
@@ -2204,7 +2205,8 @@ describe('RepoManager', () => {
 
 			// Assert
 			await waitForExpect(() => expect(spyOnIsKnownRepo).toHaveBeenCalledWith('/path/to/workspace-folder1/repo1'));
-			expect(spyOnSaveRepos).toHaveBeenCalledTimes(1);
+			// The file's pins are identical to the current state and no state was imported, so nothing is saved
+			expect(spyOnSaveRepos).toHaveBeenCalledTimes(0);
 		});
 
 		it('Shouldn\'t import the repository configuration when it is not for a known repository', async () => {

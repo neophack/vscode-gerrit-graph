@@ -10,8 +10,7 @@ For any issues or advice, you can find the pull requests page [here](https://git
 ## Resources
 
 *   [Issues](https://github.com/neophack/vscode-review-graph/issues)
-*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=neophack.gerrit-graph)
-*   [Open VSX Registry](https://open-vsx.org/extension/neophack/gerrit-graph) (A 2nd marketplace synced with the Visual Studio Marketplace, specifically for downloading the extension in editors or IDEs that support Open VSX extensions.)
+*   [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=aucneon.review-graph)
 
 This version aims to address some of the long-standing issues and to keep up with the latest VSCode updates.
 
@@ -43,6 +42,13 @@ The original Git Graph extension is an excellent tool, but some issues have rema
 ## What's New in Version 1.34.0
 
 This release includes several new features and improvements. For a detailed list of changes, please refer to the [CHANGELOG.md](CHANGELOG.md).
+
+## Recent Improvements
+
+*   **Stable Pinned Branches & Commits**: pinned branches/commits are now compared by value (they arrive deserialized over postMessage), and importing the External Configuration File is skipped while a pin write is in flight — your pins are no longer silently reverted by the extension's own config file write.
+*   **Gerrit Fetch Retry**: when a Gerrit change refs fetch fails, the stale flag is kept so the next view load retries the fetch instead of sticking to the cached data.
+*   **Uncommitted Changes Live Refresh**: the UNCOMMITTED row's message (which includes the changed file count) now re-renders when it changes between loads, while real commits skip redundant re-rendering.
+*   **`review-graph` Namespace**: the extension's full VS Code namespace (command IDs, setting keys, diff view URI scheme, per-repository config file `.vscode/review-graph.json`) has been renamed to `review-graph`, so it runs side by side with the original Git Graph extension without conflicts.
 
 ## Features
 

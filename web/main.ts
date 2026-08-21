@@ -524,6 +524,9 @@ class GitGraphView {
 	private appendCommits(commits: GG.GitCommit[], moreAvailable: boolean, gerritPending: boolean) {
 		const previousLength = this.commits.length;
 		this.moreCommitsAvailable = moreAvailable;
+		// The comparator in canAppendCommits intentionally ignores the message: for real commits it
+		// never changes, but the UNCOMMITTED row's message includes the (changing) file count
+		const uncommittedChanged = this.commits[0].hash === UNCOMMITTED && commits[0].message !== this.commits[0].message;
 		this.commits = commits;
 
 		const avatarsNeeded: { [email: string]: string[] } = {};
@@ -547,6 +550,7 @@ class GitGraphView {
 		// re-apply the graph column layout so the Graph column (and width limit) tracks the new
 		// width, otherwise the absolutely positioned SVG overlaps the Description text
 		applyGraphColumnAutoLayout(this);
+		if (uncommittedChanged) this.renderUncommittedChanges();
 		this.finaliseLoadCommits(gerritPending);
 		this.requestAvatars(avatarsNeeded);
 	}

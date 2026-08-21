@@ -996,8 +996,10 @@ export class GitGraphView extends Disposable {
 				this.gerritFetches.set(repo, fetch);
 			}
 			const fetched = await fetch;
-			this.gerritStaleRepos.delete(repo);
-			if (fetched !== null) cache = fetched; // on failure, fall back to the local cache (if any)
+			if (fetched !== null) {
+				this.gerritStaleRepos.delete(repo);
+				cache = fetched;
+			} // on failure, fall back to the local cache (if any) and keep the stale flag so the next load retries the fetch
 		}
 		if (cache === null) return null;
 		return this.buildGerritViewData(cache, statusFilter);
